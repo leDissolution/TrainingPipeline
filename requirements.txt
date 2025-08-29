@@ -2,7 +2,6 @@ bitsandbytes==0.45.5
 datasets==3.6.0
 peft==0.14.0
 PyYAML==6.0.2
-torch==2.6.0+cu124
 transformers==4.48.3
 trl==0.15.2
 unsloth==2025.3.19
