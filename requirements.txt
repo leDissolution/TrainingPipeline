@@ -5,5 +5,5 @@ PyYAML==6.0.2
 transformers==4.48.3
 trl==0.15.2
 unsloth==2025.3.19
-unsloth_zoo==2025.5.11
+unsloth_zoo==2025.3.17
 xformers==0.0.29.post3
