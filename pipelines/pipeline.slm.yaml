@@ -1,4 +1,4 @@
-environment: configs/environments/local.yaml
+environment: configs/environments/pod.yaml
 vars:
   MODEL_NAME: "slm2"
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
