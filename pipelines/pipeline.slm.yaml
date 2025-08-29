@@ -14,7 +14,7 @@ stages:
         --with_loss: false
         --with_chats: false
         --with_synthetic: true
-        --clean
+        --clean: true
 
   - name: stage0_make_sweeps
     make_sweeps:
