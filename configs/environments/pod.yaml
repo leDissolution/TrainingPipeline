@@ -2,6 +2,6 @@ name: pod
 vars:
   ARTIFACTORY_BASE: "/workspace/artifacts"
   DATASET_BASE: "/workspace/datasets"
-  LOGS_BASE: "/mnt/logs/pipeline_runs"
+  LOGS_BASE: "/workspace/work/logs/"
   CONFIG_BASE: "/workspace/configs"
-  WORK_BASE: "/mnt/work/in_training"
+  WORK_BASE: "/workspace/work/in_training"

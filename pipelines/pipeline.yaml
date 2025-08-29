@@ -1,4 +1,4 @@
-environment: configs/environments/local.yaml
+environment: configs/environments/pod.yaml
 vars:
   # LOGS_BASE: ${REPO_ROOT}/pipeline_runs
 
