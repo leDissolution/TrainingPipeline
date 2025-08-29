@@ -1,0 +1,67 @@
+dataset:
+  text_field: prompt
+
+model:
+  attn_implementation: eager
+  dtype: bfloat16
+  load_in_4bit: false
+  load_in_8bit: false
+  max_seq_length: 4096
+
+peft:
+  r: 100
+  lora_alpha: 100
+  lora_dropout: 0.0
+  random_state: 3407
+  use_gradient_checkpointing: unsloth
+  modules_to_save:
+    - embed_tokens
+    - lm_head
+  force_requires_grad_on_embeddings: true
+  modules:
+    - mlp.down_proj
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+training:
+  logging_dir: "${LOGS_BASE}/${stage.name}"
+  seed: 3407
+  effective_batch_size: 14
+  per_device_eval_batch_size: 24
+  gradient_accumulation_steps: 1
+  dataset_num_proc: 1
+  per_device_train_batch_size: auto
+  batch_compute:
+    device_count: auto
+    on_uneven_split: warn_then_floor
+    minimum_per_device: 1
+  warmup_ratio: 0.25
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.33
+  weight_decay: 0.01
+  optim: adamw_8bit
+  adam_beta1: 0.9
+  adam_beta2: 0.99
+  max_steps: -1
+  num_train_epochs: 1
+  max_grad_norm: 1.0
+  logging_steps: 25
+  report_to: tensorboard
+  run_name: "${stage.name}"
+  save_strategy: steps
+  save_steps: 100
+  save_only_model: true
+  eval_strategy: steps
+  eval_steps: 25
+  eval_on_start: true
+
+collator:
+  mode: last_completion_only
+  completion_start_marker: '="'
+
+metrics:
+  expected_value_field: expected_value
+  target_attr_path: target.attr

@@ -1,0 +1,85 @@
+extends: ../base.yaml
+
+dataset:
+  base_path: "${DATASET}/Synthetic"
+  stats:
+    - location
+    - pose
+    - outfit
+    - accessories
+    - bodyState
+    - fixtures
+    - items
+    - noop
+
+model:
+  model_name: "ibm-granite/granite-3.1-2b-base"
+
+tokens:
+  pad_to_eos: true
+  add_and_init:
+    - { token: "!!no_change!!",    init: "sameSamecopyCopycloneCloneidentical" }
+    - { token: "message",          init: "messagenew" }
+    - { token: "previousMessage",  init: "messageold" }
+    - { token: "stats",            init: "stats" }
+    - { token: "unspecified",      init: "undefined" }
+    - { token: "nude",             init: "bare" }
+  grad_boost:
+    factor: 5.0
+    target: all            # new | all
+    apply_to: ["input", "output"]
+
+peft:
+  r: 128
+  lora_alpha: rank
+  lora_dropout: 0.0
+  modules_to_save: ["embed_tokens", "lm_head"]
+  modules:
+    - mlp.down_proj
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  layered_modules:
+    mlp.up_proj:
+      layers: auto
+    mlp.gate_proj:
+      layers: auto
+
+layerwise_lr:
+  base_lr: 3.0e-5
+  groups:
+    - name: up
+      suffixes: ["mlp.up_proj"]
+      layers: { start: 20, end: 40 }
+      lr_scale: 0.33
+      force_enable: true
+    - name: gate
+      suffixes: ["mlp.gate_proj"]
+      layers: { start: 10, end: 40 }
+      lr_scale: 0.66
+      force_enable: true
+    - name: embed
+      suffixes: ["embed_tokens", "lm_head"]
+      lr_scale: 0.35
+      weight_decay: 0.0001
+
+training:
+  output_dir: "${WORK_BASE}/g2b-stage0"
+  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
+  effective_batch_size: 6
+  gradient_accumulation_steps: 1
+  warmup_ratio: 0.1
+  lr_scheduler_type: constant
+  lr_scheduler_kwargs: { min_lr_rate: 0.33 }
+  weight_decay: 0.001
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  num_train_epochs: 1
+  max_grad_norm: 1.0
+  logging_steps: 1
+  save_strategy: epoch
+  save_only_model: true
+  eval_strategy: steps
+  eval_steps: 50
+  eval_on_start: true

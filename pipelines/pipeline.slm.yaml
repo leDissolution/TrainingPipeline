@@ -1,0 +1,72 @@
+environment: configs/environments/local.yaml
+vars:
+  MODEL_NAME: "slm2"
+  DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
+
+stages:
+  - name: prepare_dataset
+    script:
+      name: ../DatasetProcessor/prepare_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --out_path: "${DATASET}"
+        --with_loss: false
+        --with_chats: false
+        --with_synthetic: true
+        --clean
+
+  - name: stage0_make_sweeps
+    make_sweeps:
+      base_config: configs/${MODEL_NAME}/stage0/base.yaml
+      name: lr
+      param_ranges:
+        layerwise_lr.base_lr: [1e-5, 3e-5, 5e-5]
+
+  - name: stage0
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 1
+    script:
+      name: train.py
+      args:
+        #--config: ${CONFIG_BASE}/${MODEL_NAME}/stage0/base.yaml
+        --config:
+          sweep: configs/${MODEL_NAME}/stage0/lr
+
+  # - name: stage1
+  #   env_variables:
+  #     - name: CUDA_VISIBLE_DEVICES
+  #       value: 1
+  #   script:
+  #     name: train.py
+  #     args:
+  #       --config: ${CONFIG_BASE}/${MODEL_NAME}/stage1/base.yaml
+
+  # - name: prepare_dataset_2
+  #   script:
+  #     name: ../DatasetProcessor/prepare_dataset.py
+  #     venv: ../DatasetProcessor/.venv
+  #     args:
+  #       --base_path: "${DATASET_BASE}"
+  #       --with_loss: true
+  #       --model_name: "${ARTIFACTORY_BASE}/${MODEL_NAME}-stage1"
+  #       --with_chats: true
+  #       --with_synthetic: true
+  #       --out_path: "${DATASET_BASE}/Prepared"
+
+  # - name: assemble_dataset
+  #   script:
+  #     name: ../DatasetProcessor/assemble_dataset.py
+  #     venv: ../DatasetProcessor/.venv
+  #     args:
+  #       --base_path: "${DATASET_BASE}/Prepared"
+
+  # - name: stage2
+  #   env_variables:
+  #     - name: CUDA_VISIBLE_DEVICES
+  #       value: 1
+  #   script:
+  #     name: train.py
+  #     args:
+  #       --config: ${CONFIG_BASE}/${MODEL_NAME}/stage2/base.yaml

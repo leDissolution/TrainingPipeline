@@ -1,0 +1,73 @@
+extends: ../base.yaml
+
+dataset:
+  base_path: "${DATASET}/Synthetic"
+  stats:
+    - location
+    - pose
+    - pose-location
+    - outfit
+    - accessories
+    - bodyState
+    - mood
+    - character
+    - fixtures
+    - items
+  train_template: "{stat}.train.jsonl"
+  eval_template: "{stat}.eval.jsonl"
+
+model:
+  model_name: "${ARTIFACTORY_BASE}/g2b-stage0"
+
+peft:
+  r: 100
+  lora_alpha: 100
+  lora_dropout: 0.0
+  modules_to_save:
+    - embed_tokens
+    - lm_head
+  modules:
+    - mlp.down_proj
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+layerwise_lr:
+  base_lr: 3.0e-5
+  groups:
+    - name: up
+      suffixes: ["mlp.up_proj"]
+      layers: { start: 20, end: 29 }
+      lr_scale: 0.5
+      force_enable: true
+    - name: gate
+      suffixes: ["mlp.gate_proj"]
+      layers: { start: 20, end: 29 }
+      lr_scale: 0.5
+      force_enable: true
+    - name: embed
+      suffixes: ["embed_tokens", "lm_head"]
+      lr_scale: 0.01
+
+training:
+  output_dir: "${WORK_BASE}/g2b-stage1"
+  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage1"
+  effective_batch_size: 14
+  gradient_accumulation_steps: 1
+  warmup_ratio: 0.25
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.33
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.99
+  max_steps: 1200
+  max_grad_norm: 1.0
+  logging_steps: 1
+  save_strategy: steps
+  save_steps: 100
+  save_only_model: false
+  eval_strategy: steps
+  eval_steps: 50
+  eval_on_start: true

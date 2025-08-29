@@ -1,0 +1,8 @@
+/.venv
+/.vscode
+/unsloth*/
+/_unsloth*/
+__pycache__/*
+*/__pycache__/*
+/pipeline_runs/*
+configs/environments/local.yaml

@@ -1,0 +1,4 @@
+extends: ..\base.yaml
+swipe_name: base_lr-3e-5
+layerwise_lr:
+  base_lr: 3e-5

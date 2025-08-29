@@ -1,0 +1,66 @@
+extends: ../base.yaml
+
+dataset:
+  train_files:
+  - "${DATASET}/Processed-stage1/Assembled/train_high.jsonl"
+  eval_files:
+  - "${DATASET}/Processed-stage1/Assembled/eval.jsonl"
+
+model:
+  model_name: "${ARTIFACTORY_BASE}/g2b-stage1"
+  max_seq_length: 4096
+
+peft:
+  r: 120
+  lora_alpha: 120
+  lora_dropout: 0.0
+  modules_to_save:
+    - embed_tokens
+    - lm_head
+  modules:
+    - mlp.down_proj
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+layerwise_lr:
+  base_lr: 4.0e-5
+  groups:
+    - name: up
+      suffixes: ["mlp.up_proj"]
+      layers: { start: 18, end: 31 }
+      lr_scale: 0.1
+      force_enable: true
+    - name: gate
+      suffixes: ["mlp.gate_proj"]
+      layers: { start: 8, end: 36 }
+      lr_scale: 0.2
+      force_enable: true
+    - name: embed
+      suffixes: ["embed_tokens", "lm_head"]
+      lr_scale: 0.001
+
+training:
+  output_dir: "${WORK_BASE}/g2b-stage2"
+  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage2"
+  effective_batch_size: 24
+  gradient_accumulation_steps: 4
+  warmup_ratio: 0.1
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.25
+  weight_decay: 0.05
+  adam_beta1: 0.9
+  adam_beta2: 0.99
+  max_steps: 1700
+  max_grad_norm: 1.0
+  logging_steps: 1
+  save_strategy: steps
+  save_steps: 100
+  save_only_model: false
+  eval_strategy: steps
+  eval_steps: 100
+  eval_on_start: true
+  per_device_eval_batch_size: 18
+  torch_empty_cache_steps: 2
