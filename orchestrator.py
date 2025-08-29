@@ -30,12 +30,17 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def _venv_python(venv_path: str) -> str:
+def _venv_python(venv_path: str) -> str | None:
     # Return Python executable path for a venv
     if _is_windows():
         cand = os.path.join(venv_path, "Scripts", "python.exe")
     else:
         cand = os.path.join(venv_path, "bin", "python")
+
+    if not os.path.exists(cand):
+        cand = None
+        print(f"[orchestrator] Warning: Python executable not found in venv at {venv_path}")
+
     return cand
 
 
@@ -650,6 +655,10 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
         for r_idx, args_map in enumerate(expanded_runs):
             # Compose command
             py = _venv_python(st.venv) if st.venv else default_python
+            if not py:
+                print(f"[orchestrator] Warning: Using default Python interpreter: {default_python}")
+                py = default_python
+                
             assert st.script is not None
             cmd: List[str] = [py, st.script]
             cmd.extend(_flatten_args(args_map))
