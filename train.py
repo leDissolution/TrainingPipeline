@@ -1,4 +1,5 @@
 import argparse
+import json
 import gc
 import os
 from copy import deepcopy
@@ -580,7 +581,7 @@ def main() -> None:
 
     # Logging dir defaults under the (possibly swipe-namespaced) output_dir
     logging_dir = str(train_cfg.get("logging_dir", os.path.join(output_dir, "runs")))
-    logging_dir = os.path.join(logging_dir, base_run_name, run_name)
+    logging_dir = os.path.join(logging_dir, swipe_name, run_name)
 
     sft_args = SFTConfig(
         output_dir=output_dir,
@@ -640,6 +641,37 @@ def main() -> None:
 
     trainer.train(resume_from_checkpoint=False)
 
+    # Capture the last available eval metrics from log history
+    last_eval_metrics: Optional[Dict[str, Any]] = None
+    try:
+        def _coerce_jsonable(v: Any) -> Any:
+            # Best-effort conversion to JSON-friendly values
+            try:
+                if isinstance(v, (int, float, str)) or v is None:
+                    return v
+                # torch / numpy scalars
+                return float(v)
+            except Exception:
+                try:
+                    return str(v)
+                except Exception:
+                    return None
+
+        log_hist = getattr(trainer.state, "log_history", [])
+        # Find the last dict containing any eval_* keys
+        last_eval_entry: Optional[Dict[str, Any]] = None
+        for entry in reversed(log_hist):
+            if isinstance(entry, dict) and any(k.startswith("eval_") for k in entry.keys()):
+                last_eval_entry = entry
+                break
+        if last_eval_entry:
+            # Keep eval_* keys and a couple of useful metadata if present
+            filtered = {k: _coerce_jsonable(v) for k, v in last_eval_entry.items() if k.startswith("eval_") or k in ("step", "epoch")}
+            if filtered:
+                last_eval_metrics = filtered
+    except Exception:
+        last_eval_metrics = None
+
     # Ensure an evaluation at the end if it didn't occur naturally at the final step
     try:
         log_hist = getattr(trainer.state, "log_history", [])
@@ -658,6 +690,11 @@ def main() -> None:
                 print(f"[Eval] Final metrics: {summary}")
             except Exception:
                 pass
+            # Override last eval metrics with the final evaluation metrics
+            try:
+                last_eval_metrics = {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in dict(final_metrics).items()}
+            except Exception:
+                pass
     except Exception as e:
         print(f"[Warning] Final eval attempt skipped: {e}")
 
@@ -667,13 +704,38 @@ def main() -> None:
         merge_dir = os.path.join(merge_dir, swipe_name)
     if merge_dir:
         print("Finished training, merging model...")
-        merged_model = model.merge_and_unload()
         os.makedirs(merge_dir, exist_ok=True)
-        merged_model = model.merge_and_unload().to("cpu", dtype=torch.float16)
+        # Merge once, then move to CPU and set dtype
+        merged_model = model.merge_and_unload()
+        try:
+            merged_model = merged_model.to("cpu", dtype=torch.float16)
+        except Exception:
+            try:
+                merged_model = merged_model.to("cpu")
+            except Exception:
+                pass
         gc.collect()
-        torch.cuda.empty_cache()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
         merged_model.save_pretrained(merge_dir, max_shard_size="3GB")
         tokenizer.save_pretrained(merge_dir)
+
+        # Persist last eval metrics alongside the merged model
+        try:
+            metrics_path = os.path.join(merge_dir, "last_eval_metrics.json")
+            payload: Dict[str, Any] = {}
+            if last_eval_metrics is not None:
+                payload = {str(k): (float(v) if isinstance(v, (int, float)) else v) for k, v in last_eval_metrics.items()}
+            else:
+                payload = {"note": "No evaluation metrics were available."}
+            with open(metrics_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            print(f"[Eval] Wrote last eval metrics to: {metrics_path}")
+        except Exception as e:
+            print(f"[Warning] Could not write last eval metrics JSON: {e}")
+
         print("Model merged and saved.")
 
 
