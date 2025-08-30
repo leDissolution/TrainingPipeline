@@ -1,7 +1,7 @@
 name: pod
 vars:
   ARTIFACTORY_BASE: "/workspace/artifacts"
-  DATASET_BASE: "/workspace/datasets"
+  DATASET_BASE: "/workspace/dataset"
   LOGS_BASE: "/workspace/work/logs/"
-  CONFIG_BASE: "/workspace/configs"
+  CONFIG_BASE: "./configs"
   WORK_BASE: "/workspace/work/in_training"

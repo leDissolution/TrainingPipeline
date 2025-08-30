@@ -34,14 +34,14 @@ stages:
         --config:
           sweep: configs/${MODEL_NAME}/stage0/lr
 
-  # - name: stage1
-  #   env_variables:
-  #     - name: CUDA_VISIBLE_DEVICES
-  #       value: 1
-  #   script:
-  #     name: train.py
-  #     args:
-  #       --config: ${CONFIG_BASE}/${MODEL_NAME}/stage1/base.yaml
+  - name: stage1
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 1
+    script:
+      name: train.py
+      args:
+        --config: ${CONFIG_BASE}/${MODEL_NAME}/stage1/base.yaml
 
   # - name: prepare_dataset_2
   #   script:
@@ -53,14 +53,14 @@ stages:
   #       --model_name: "${ARTIFACTORY_BASE}/${MODEL_NAME}-stage1"
   #       --with_chats: true
   #       --with_synthetic: true
-  #       --out_path: "${DATASET_BASE}/Prepared"
+  #       --out_path: "${DATASET}"
 
   # - name: assemble_dataset
   #   script:
   #     name: ../DatasetProcessor/assemble_dataset.py
   #     venv: ../DatasetProcessor/.venv
   #     args:
-  #       --base_path: "${DATASET_BASE}/Prepared"
+  #       --base_path: "${DATASET}"
 
   # - name: stage2
   #   env_variables:
