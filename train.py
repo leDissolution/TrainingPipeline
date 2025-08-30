@@ -699,7 +699,7 @@ def main() -> None:
         print(f"[Warning] Final eval attempt skipped: {e}")
 
     # Merge/save if requested
-    merge_dir = str(train_cfg.get("merge_output_dir", "")).strip()
+    merge_dir = str(train_cfg.get("merge_output_dir", None)).strip()
     if swipe_name and merge_dir:
         merge_dir = os.path.join(merge_dir, swipe_name)
     if merge_dir:
