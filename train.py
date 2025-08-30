@@ -580,7 +580,7 @@ def main() -> None:
 
     # Logging dir defaults under the (possibly swipe-namespaced) output_dir
     logging_dir = str(train_cfg.get("logging_dir", os.path.join(output_dir, "runs")))
-    logging_dir = _normpath_join(logging_dir, run_name)
+    logging_dir = os.path.join(logging_dir, base_run_name, run_name)
 
     sft_args = SFTConfig(
         output_dir=output_dir,
