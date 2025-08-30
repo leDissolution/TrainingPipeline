@@ -1,6 +1,6 @@
-environment: configs/environments/local.yaml
+environment: configs/environments/pod.yaml
 vars:
-  MODEL_NAME: "slm2"
+  MODEL_NAME: "g2b"
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
 
 stages:
@@ -18,10 +18,11 @@ stages:
 
   - name: stage0_make_sweeps
     make_sweeps:
-      base_config: configs/${MODEL_NAME}/stage0/base.yaml
-      name: lr
+      base_config: configs/granite2b/stage0/base.yaml
+      name: lr_boost_rank
       param_ranges:
-        layerwise_lr.base_lr: [1e-5, 3e-5, 5e-5]
+        layerwise_lr.groups["up"].lr_scale: [0.25, 0.5, 0.75]
+        layerwise_lr.groups["gate"].lr_scale: [0.25, 0.5, 0.75]
 
   - name: stage0
     env_variables:
@@ -30,9 +31,8 @@ stages:
     script:
       name: train.py
       args:
-        #--config: ${CONFIG_BASE}/${MODEL_NAME}/stage0/base.yaml
         --config:
-          sweep: configs/${MODEL_NAME}/stage0/lr
+          sweep: configs/granite2b/stage0/lr_boost_rank
 
   - name: pick_best_stage0
     select_best:
@@ -43,33 +43,23 @@ stages:
       var_name: STAGE0_BEST
       fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
 
+  - name: stage1_make_sweeps
+    make_sweeps:
+      base_config: configs/granite2b/stage1/base.yaml
+      name: gate_lr
+      param_ranges:
+        layerwise_lr.groups["up"].lr_scale: [0.25, 0.5, 0.75]
+        layerwise_lr.groups["gate"].lr_scale: [0.25, 0.5, 0.75]
+
   - name: stage1
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
-        value: 1
+        value: 0
     script:
       name: train.py
       args:
-        --config: ${CONFIG_BASE}/${MODEL_NAME}/stage1/base.yaml
-
-  # - name: prepare_dataset_2
-  #   script:
-  #     name: ../DatasetProcessor/prepare_dataset.py
-  #     venv: ../DatasetProcessor/.venv
-  #     args:
-  #       --base_path: "${DATASET_BASE}"
-  #       --with_loss: true
-  #       --model_name: "${ARTIFACTORY_BASE}/${MODEL_NAME}-stage1"
-  #       --with_chats: true
-  #       --with_synthetic: true
-  #       --out_path: "${DATASET}"
-
-  # - name: assemble_dataset
-  #   script:
-  #     name: ../DatasetProcessor/assemble_dataset.py
-  #     venv: ../DatasetProcessor/.venv
-  #     args:
-  #       --base_path: "${DATASET}"
+        --config:
+          sweep: ${CONFIG_BASE}/granite2b/stage1/gate_lr
 
   # - name: stage2
   #   env_variables:
@@ -78,4 +68,4 @@ stages:
   #   script:
   #     name: train.py
   #     args:
-  #       --config: ${CONFIG_BASE}/${MODEL_NAME}/stage2/base.yaml
+  #       --config: ${CONFIG_BASE}/granite2b/stage2/base.yaml

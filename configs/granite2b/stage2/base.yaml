@@ -7,8 +7,7 @@ dataset:
   - "${DATASET}/Processed-stage1/Assembled/eval.jsonl"
 
 model:
-  model_name: "${ARTIFACTORY_BASE}/g2b-stage1"
-  max_seq_length: 4096
+  model_name: "${STAGE1_BEST}"
 
 peft:
   r: 120

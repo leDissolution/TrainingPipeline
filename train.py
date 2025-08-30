@@ -738,6 +738,25 @@ def main() -> None:
 
         print("Model merged and saved.")
 
+        # Cleanup: remove optimizer.pt files from checkpoints to save space
+        try:
+            checkpoint_root = output_dir
+            removed = 0
+            if os.path.isdir(checkpoint_root):
+                for root, dirs, files in os.walk(checkpoint_root):
+                    # Only act on HF Trainer checkpoint folders
+                    if os.path.basename(root).startswith("checkpoint"):
+                        opt_path = os.path.join(root, "optimizer.pt")
+                        if os.path.isfile(opt_path):
+                            try:
+                                os.remove(opt_path)
+                                removed += 1
+                            except Exception as e:
+                                print(f"[Cleanup] Failed to remove {opt_path}: {e}")
+            print(f"[Cleanup] Removed optimizer.pt from {removed} checkpoint(s) under '{checkpoint_root}'.")
+        except Exception as e:
+            print(f"[Cleanup] Skipped optimizer cleanup due to error: {e}")
+
 
 if __name__ == "__main__":
     main()

@@ -17,7 +17,7 @@ dataset:
   eval_template: "{stat}.eval.jsonl"
 
 model:
-  model_name: "${ARTIFACTORY_BASE}/g2b-stage0"
+  model_name: "${STAGE0_BEST}"
 
 peft:
   r: 100
