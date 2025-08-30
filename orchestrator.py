@@ -18,12 +18,13 @@ import re
 @dataclass
 class Stage:
     name: str
-    kind: str  # 'script' | 'make_sweeps'
+    kind: str  # 'script' | 'make_sweeps' | 'select_best'
     script: Optional[str]
     venv: Optional[str]
     args: Dict[str, Any]
     env: Dict[str, str]
     sweeps: Optional[Dict[str, Any]]
+    select: Optional[Dict[str, Any]]
 
 
 def _is_windows() -> bool:
@@ -230,6 +231,23 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                     args={},
                     env=env_vars,
                     sweeps=sweeps_cfg,
+                    select=None,
+                )
+            )
+            continue
+
+        if "select_best" in st and st.get("select_best") is not None:
+            sel_cfg = st.get("select_best") or {}
+            stages.append(
+                Stage(
+                    name=name,
+                    kind="select_best",
+                    script=None,
+                    venv=None,
+                    args={},
+                    env=env_vars,
+                    sweeps=None,
+                    select=sel_cfg,
                 )
             )
             continue
@@ -250,7 +268,8 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                 venv=str(venv) if venv else None,
                 args=args_map,
                 env=env_vars,
-                sweeps=None,
+                    sweeps=None,
+                    select=None,
             )
         )
     return repo_root, stages
@@ -643,6 +662,129 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
             # proceed to next stage
             continue
 
+        # Handle select_best stages
+        if st.kind == "select_best":
+            stage_log_dir = os.path.join(base_log_dir, f"{s_idx+1:02d}_{st.name}")
+            _ensure_dir(stage_log_dir)
+            try:
+                sel_cfg = _deep_interpolate(st.select or {}, scope_vars)
+                # Config
+                from_dir_raw = str(sel_cfg.get("from_dir", "")).strip()
+                var_name = str(sel_cfg.get("var_name", "BEST_MODEL_PATH")).strip()
+                metric = str(sel_cfg.get("metric", "exact_match")).strip()
+                prefer = str(sel_cfg.get("prefer", "max")).strip().lower()
+                require_file = str(sel_cfg.get("file", "last_eval_metrics.json")).strip()
+                fallback_path = str(sel_cfg.get("fallback", "")).strip()
+                if not from_dir_raw:
+                    raise ValueError("select_best.from_dir is required")
+                from_dir = _normpath(repo_root, from_dir_raw)
+
+                # Scan candidates: consider both direct from_dir and its immediate subdirectories
+                candidates: List[Tuple[str, float, float]] = []  # (path, metric_value, tie_breaker_mtime)
+                paths_to_check: List[str] = []
+                try:
+                    # Add direct folder in case metrics are at root
+                    paths_to_check.append(from_dir)
+                    for entry in os.listdir(from_dir):
+                        p = os.path.join(from_dir, entry)
+                        if os.path.isdir(p):
+                            paths_to_check.append(p)
+                except Exception as e:
+                    print(f"[orchestrator] select_best: cannot list {from_dir}: {e}")
+
+                for p in paths_to_check:
+                    mpath = os.path.join(p, require_file)
+                    if not os.path.exists(mpath):
+                        continue
+                    data = None
+                    try:
+                        ext = os.path.splitext(mpath)[1].lower()
+                        if ext in (".json",):
+                            import json as _json
+                            with open(mpath, "r", encoding="utf-8") as f:
+                                data = _json.load(f)
+                        elif ext in (".yml", ".yaml"):
+                            with open(mpath, "r", encoding="utf-8") as f:
+                                data = yaml.safe_load(f)
+                        else:
+                            # Try JSON first, then YAML
+                            try:
+                                import json as _json
+                                with open(mpath, "r", encoding="utf-8") as f:
+                                    data = _json.load(f)
+                            except Exception:
+                                with open(mpath, "r", encoding="utf-8") as f:
+                                    data = yaml.safe_load(f)
+                    except Exception:
+                        data = None
+                    if not isinstance(data, dict):
+                        continue
+                    # Support plain metric key or eval_<metric>
+                    val_raw = data.get(metric)
+                    if val_raw is None:
+                        alt = metric if metric.startswith("eval_") else f"eval_{metric}"
+                        val_raw = data.get(alt)
+                        if val_raw is None and metric.startswith("eval_"):
+                            # also try stripping eval_
+                            val_raw = data.get(metric[len("eval_") :])
+                    if val_raw is None:
+                        continue
+                    try:
+                        val = float(val_raw)
+                    except Exception:
+                        continue
+                    try:
+                        mtime = os.path.getmtime(mpath)
+                    except Exception:
+                        mtime = 0.0
+                    candidates.append((p, val, mtime))
+
+                if not candidates:
+                    print(f"[orchestrator] select_best: no candidates found under {from_dir} with file={require_file}")
+                    # Optionally set fallback
+                    summary_path = os.path.join(stage_log_dir, "stage.log")
+                    with open(summary_path, "w", encoding="utf-8") as lf:
+                        lf.write(f"No candidates found in {from_dir}.\n")
+                        if fallback_path:
+                            lf.write(f"Using fallback -> {fallback_path} as ${var_name}.\n")
+                    if fallback_path:
+                        scope_vars[var_name] = fallback_path
+                        try:
+                            if isinstance(pipeline_vars, dict):
+                                pipeline_vars[var_name] = fallback_path
+                        except Exception:
+                            pass
+                    continue
+
+                reverse = (prefer != "min")
+                # Sort by metric, then mtime as tiebreaker
+                candidates.sort(key=lambda t: (t[1], t[2]), reverse=reverse)
+                best_path, best_val, best_mtime = candidates[0]
+
+                # Persist selection into scope vars and pipeline vars for subsequent stages
+                scope_vars[var_name] = best_path
+                try:
+                    # Update pipeline_vars so it's exported into env of later stages
+                    if isinstance(pipeline_vars, dict):
+                        pipeline_vars[var_name] = best_path
+                except Exception:
+                    pass
+                print(f"[orchestrator] select_best: {metric}={best_val:.6f} -> {best_path} (as ${var_name})")
+                # Write a small summary log
+                summary_path = os.path.join(stage_log_dir, "stage.log")
+                with open(summary_path, "w", encoding="utf-8") as lf:
+                    lf.write(f"Selected best by {metric} ({'max' if reverse else 'min'}):\n")
+                    lf.write(f"  {best_path} : {best_val}\n\n")
+                    lf.write("Top candidates:\n")
+                    for p, v, mt in candidates[:10]:
+                        lf.write(f"  {v:0.6f}\t{p}\n")
+            except Exception as e:
+                print(f"[orchestrator] select_best failed: {e}")
+                overall_rc = 1
+                if stop_on_fail:
+                    return overall_rc
+            continue
+
         # Expand sweeps (cross-product across any sweep args)
         # Interpolate args/env with scope vars prior to sweep expansion
         stage_env = {k: _interpolate_string(v, scope_vars) for k, v in (st.env or {}).items()}
@@ -658,7 +800,7 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
             if not py:
                 print(f"[orchestrator] Warning: Using default Python interpreter: {default_python}")
                 py = default_python
-                
+
             assert st.script is not None
             cmd: List[str] = [py, st.script]
             cmd.extend(_flatten_args(args_map))
