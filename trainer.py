@@ -15,11 +15,12 @@ progressively without removing current code in scripts.
 """
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence, Tuple, Dict, Any, Optional, cast
+from typing import Iterable, List, Sequence, Tuple, Dict, Any, Optional, cast, Sized
 from dataclasses import dataclass
 
 import torch
 from trl import SFTTrainer
+from torch.utils.data import RandomSampler, DistributedSampler, IterableDataset
 
 # ---------------------------------------------------------------------------
 # Group specification (order matters; first match wins)
@@ -142,11 +143,19 @@ class LayerwiseLRTrainer(SFTTrainer):
         *args,
         group_specs: Optional[Sequence[GroupSpec]] = None,
         base_lr: float = 1e-4,
+        dataset_seed: Optional[int] = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._base_lr = float(base_lr)
         self._specs: List[GroupSpec] = list(group_specs) if group_specs is not None else []
+        # Optional separate RNG seed for dataset shuffling, independent of self.args.seed
+        self._dataset_seed: Optional[int] = int(dataset_seed) if dataset_seed is not None else None
+        self._dataset_generator: Optional[torch.Generator] = None
+        if self._dataset_seed is not None:
+            gen = torch.Generator()
+            gen.manual_seed(self._dataset_seed)
+            self._dataset_generator = gen
 
     def create_optimizer(self):  # type: ignore[override]
         if self.optimizer is None:
@@ -173,6 +182,31 @@ class LayerwiseLRTrainer(SFTTrainer):
                     print(f"[Warning] Group '{spec.name}' matched {count} parameters with requires_grad=False. They were not included in optimization.")
         return self.optimizer
 
+    def _get_train_sampler(self):  # type: ignore[override]
+        if self.train_dataset is None:
+            return None
+        if isinstance(self.train_dataset, IterableDataset):
+            return None
+
+        world_size = getattr(self.args, "world_size", 1)
+        process_index = getattr(self.args, "process_index", 0)
+
+        if world_size is None or world_size <= 1:
+            ds_sized = cast(Sized, self.train_dataset)
+            if self._dataset_generator is not None:
+                return RandomSampler(ds_sized, generator=self._dataset_generator)
+            return RandomSampler(ds_sized)
+        else:
+            seed = self._dataset_seed if self._dataset_seed is not None else int(getattr(self.args, "seed", 0))
+            ds_any = cast(Any, self.train_dataset)
+            return DistributedSampler(
+                ds_any,
+                num_replicas=world_size,
+                rank=process_index,
+                shuffle=True,
+                seed=int(seed),
+                drop_last=False,
+            )
 
 __all__ = [
     "GroupSpec",

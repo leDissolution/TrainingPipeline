@@ -556,6 +556,7 @@ def main() -> None:
 
     # SFT args
     train_cfg = cfg.get("training", {})
+    dataset_seed = train_cfg.get("dataset_seed", None)
 
     # Infer precision from model dtype (avoid mismatch)
     bf16 = dtype == torch.bfloat16
@@ -711,6 +712,7 @@ def main() -> None:
         compute_metrics=metric_calculator.compute_metrics,
         preprocess_logits_for_metrics=metric_calculator.keep_argmax,
         args=sft_args,
+        dataset_seed=(int(dataset_seed) if dataset_seed is not None else None),
     )
 
     # Add per-example eval logger (writes JSONL files, not TensorBoard)
