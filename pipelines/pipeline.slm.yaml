@@ -34,14 +34,14 @@ stages:
         --config:
           sweep: configs/${MODEL_NAME}/stage0/lr
 
-  - name: stage1
-    env_variables:
-      - name: CUDA_VISIBLE_DEVICES
-        value: 1
-    script:
-      name: train.py
-      args:
-        --config: ${CONFIG_BASE}/${MODEL_NAME}/stage1/base.yaml
+  # - name: stage1
+  #   env_variables:
+  #     - name: CUDA_VISIBLE_DEVICES
+  #       value: 1
+  #   script:
+  #     name: train.py
+  #     args:
+  #       --config: ${CONFIG_BASE}/${MODEL_NAME}/stage1/base.yaml
 
   # - name: prepare_dataset_2
   #   script:
