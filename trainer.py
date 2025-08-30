@@ -68,19 +68,41 @@ def build_param_groups_from_specs(
 
     Any parameter that does not match any spec goes into the base group
     at base_lr. Only includes requires_grad parameters.
+
+    Special handling:
+    - If a spec resolves to an effective learning rate of 0 (either lr == 0
+      or lr_scale == 0), all parameters matched by that spec are frozen by
+      setting requires_grad=False and are not added to any optimizer group.
+      This avoids confusing the optimizer with zero-lr groups and makes the
+      freeze intent explicit.
     """
     matched_sets: List[List[torch.nn.Parameter]] = [[] for _ in specs]
     disabled_counts: Dict[str, int] = {spec.name: 0 for spec in specs}
     base: List[torch.nn.Parameter] = []
 
+    def _effective_lr(spec: GroupSpec) -> float:
+        if spec.lr is not None:
+            return float(spec.lr)
+        scale = 1.0 if spec.lr_scale is None else float(spec.lr_scale)
+        return float(base_lr * scale)
+
+    # Determine which specs imply freezing (effective lr == 0)
+    freeze_spec: List[bool] = [(_effective_lr(s) == 0.0) for s in specs]
+
     for n, p in model.named_parameters():
         placed = False
         for i, spec in enumerate(specs):
             if _name_matches_spec(n, spec):
-                if p.requires_grad:
-                    matched_sets[i].append(p)
-                else:
+                if freeze_spec[i]:
+                    # Freeze matched params for zero-lr groups
+                    if p.requires_grad:
+                        p.requires_grad = False
                     disabled_counts[spec.name] = disabled_counts.get(spec.name, 0) + 1
+                else:
+                    if p.requires_grad:
+                        matched_sets[i].append(p)
+                    else:
+                        disabled_counts[spec.name] = disabled_counts.get(spec.name, 0) + 1
                 placed = True
                 break  # first match wins
         if not placed and p.requires_grad:
