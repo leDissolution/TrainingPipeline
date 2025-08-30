@@ -619,6 +619,87 @@ def main() -> None:
         torch_empty_cache_steps=train_cfg.get("torch_empty_cache_steps", None),
     )
 
+    # Persist hyperparameters (+ LoRA) to JSON in the logging directory
+    try:
+        os.makedirs(logging_dir, exist_ok=True)
+
+        def _json_safe(v: Any) -> Any:
+            try:
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    return v
+                # Enums (e.g., lr scheduler type) -> string value
+                if hasattr(v, "value"):
+                    return _json_safe(getattr(v, "value"))
+                # Tensors -> summary string
+                if isinstance(v, torch.Tensor):
+                    return {"tensor": list(v.size())}
+                # Paths and other objects -> string
+                if isinstance(v, (list, tuple)):
+                    return [_json_safe(x) for x in v]
+                if isinstance(v, dict):
+                    return {str(k): _json_safe(val) for k, val in v.items()}
+                return str(v)
+            except Exception:
+                return str(v)
+
+        # Trainer/TrainingArguments (SFTConfig)
+        try:
+            trainer_args_dict = sft_args.to_dict()  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                # transformers >=4.44 has to_sanitized_dict
+                trainer_args_dict = sft_args.to_sanitized_dict()  # type: ignore[attr-defined]
+            except Exception:
+                trainer_args_dict = {k: getattr(sft_args, k) for k in dir(sft_args) if not k.startswith("_") and not callable(getattr(sft_args, k, None))}
+        trainer_args_dict = {str(k): _json_safe(v) for k, v in dict(trainer_args_dict).items()}
+
+        # LoRA/PEFT details
+        lora_info: Dict[str, Any] = {
+            "r": rank,
+            "lora_alpha": alpha,
+            "lora_dropout": float(peft_cfg.get("lora_dropout", 0.0)),
+            "use_gradient_checkpointing": _json_safe(peft_cfg.get("use_gradient_checkpointing", "unsloth")),
+            "random_state": int(peft_cfg.get("random_state", 3407)),
+            "modules_to_save": [str(m) for m in peft_cfg.get("modules_to_save", [])],
+            "target_modules": list(target_modules),
+            "force_requires_grad_on_embeddings": bool(peft_cfg.get("force_requires_grad_on_embeddings", True)),
+            "dtype": str(model_cfg.get("dtype", "bfloat16")),
+        }
+
+        # Layerwise LR details
+        layerwise_dump = {
+            "base_lr": base_lr,
+            "groups": [
+                {
+                    "name": gs.name,
+                    "suffixes": list(gs.suffixes),
+                    "layers": list(gs.layers) if gs.layers is not None else None,
+                    "lr": gs.lr,
+                    "lr_scale": gs.lr_scale,
+                    "weight_decay": gs.weight_decay,
+                }
+                for gs in group_specs
+            ],
+        }
+
+        payload: Dict[str, Any] = {
+            "run": {
+                "swipe_name": swipe_name,
+                "run_name": run_name,
+                "output_dir": output_dir,
+                "logging_dir": logging_dir,
+            },
+            "trainer": trainer_args_dict,
+            "peft": lora_info,
+            "layerwise_lr": layerwise_dump,
+        }
+
+        with open(os.path.join(logging_dir, "hparams.json"), "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"[HParams] Wrote hyperparameters to {os.path.join(logging_dir, 'hparams.json')}")
+    except Exception as e:
+        print(f"[HParams] Failed to write hparams: {e}")
+
     trainer = LayerwiseLRTrainer(
         model=model,
         train_dataset=dataset,
