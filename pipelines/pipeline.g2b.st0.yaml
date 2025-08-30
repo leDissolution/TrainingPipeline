@@ -21,7 +21,7 @@ stages:
       base_config: configs/granite2b/stage0/base.yaml
       name: lr_boost_rank
       param_ranges:
-        training.merge_output_dir: None
+        training.merge_output_dir: [ None ]
         training.seed: [42, 1234, 3407]
         layerwise_lr.groups["up"].lr_scale: [1, 0.25, 0.0625, 0]
         layerwise_lr.groups["gate"].lr_scale: [1, 0.25, 0.0625, 0]
