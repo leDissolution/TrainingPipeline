@@ -1,5 +1,5 @@
 from transformers.trainer_callback import TrainerCallback
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional, Any, Dict, DefaultDict, Iterable
 import os
 import json
 
@@ -54,6 +54,8 @@ class HeadDropEvalControl(TrainerCallback):
 import numpy as np
 import torch
 import re
+from collections import defaultdict
+from torch.utils.tensorboard.writer import SummaryWriter
 
 class MetricCalculator:
     def __init__(self, tokenizer, ignore_index: int = -100,
@@ -324,3 +326,175 @@ class PerExampleEvalLogger(TrainerCallback):
         except Exception:
             # Non-fatal: avoid breaking training due to logging issues
             return
+
+
+class GradTensorBoardLogger(TrainerCallback):
+    """Logs gradient stats per layer and module kind (mlp vs self_attn) to TensorBoard.
+
+    Implementation details:
+    - Registers autograd hooks on trainable parameters once at train start.
+    - On each step, aggregates sum of squares and abs sums per (layer_index, kind).
+      Kind is determined from parameter name containing ".mlp." or ".self_attn.".
+    - On logging steps (control.should_log), writes scalars to TB under tags like:
+        grads/layer_{i}/self_attn/l2
+        grads/layer_{i}/self_attn/mean_abs
+        grads/layer_{i}/mlp/l2
+        grads/layer_{i}/mlp/mean_abs
+
+    Notes:
+    - Overhead: scans each gradient tensor once via simple reductions.
+    - Safe with gradient accumulation: hooks see every backward; we reset
+      accumulators at step begin so stats reflect the current optimizer step.
+    """
+
+    # Class-level annotations for static analysis
+    _writer: Optional[SummaryWriter]
+    _acc: DefaultDict[Tuple[int, str], Dict[str, float]]
+    _handles: List[Any]
+    _seen_step: Optional[int]
+
+    def __init__(
+        self,
+        logging_dir: str,
+        include_kinds: Iterable[str] = ("self_attn", "mlp"),
+        tag_prefix: str = "grads",
+    ) -> None:
+        super().__init__()
+        self.logging_dir = str(logging_dir)
+        self.include_kinds = {str(k) for k in include_kinds}
+        self.tag_prefix = str(tag_prefix).strip() or "grads"
+        self._writer = None  # type: ignore[assignment]
+        # (layer_idx:int, kind:str) -> {sq_sum:float, abs_sum:float, count:float}
+        self._acc = defaultdict(lambda: {"sq_sum": 0.0, "abs_sum": 0.0, "count": 0.0})  # type: ignore[assignment]
+        self._handles = []
+        self._seen_step = None
+
+    def _parse_param_group(self, name: str) -> Optional[Tuple[int, str]]:
+        # Find layer index
+        m = re.search(r"(?:^|\.)layers\.(\d+)\.", name)
+        if not m:
+            return None
+        layer_idx = int(m.group(1))
+        kind = None
+        if ".self_attn." in name:
+            kind = "self_attn"
+        elif ".mlp." in name:
+            kind = "mlp"
+        if kind is None or kind not in self.include_kinds:
+            return None
+        return (layer_idx, kind)
+
+    def _register_hooks(self, model) -> None:
+        # Register on all named parameters once
+        iterator = model.named_parameters() if hasattr(model, "named_parameters") else []
+        for name, p in iterator:
+            if not isinstance(p, torch.nn.Parameter) or not p.requires_grad:
+                continue
+            key = self._parse_param_group(name)
+            if key is None:
+                continue
+
+            def _make_hook(k: Tuple[int, str]):
+                def _hook(grad: torch.Tensor):
+                    try:
+                        if grad is None or grad.numel() == 0:
+                            return grad
+                        ds = self._acc[k]
+                        # Use CPU item extractions to avoid storing tensors
+                        # Sum of squares and abs sum across all elements
+                        ds["sq_sum"] += float(torch.sum(grad.detach() * grad.detach()).item())
+                        ds["abs_sum"] += float(torch.sum(grad.detach().abs()).item())
+                        ds["count"] += float(grad.numel())
+                    except Exception:
+                        pass
+                    return grad
+                return _hook
+
+            h = p.register_hook(_make_hook(key))
+            self._handles.append(h)
+
+    # ------------- Callback events -------------
+    def on_train_begin(self, args, state, control, **kwargs):
+        # Create writer lazily and hook parameters
+        try:
+            if self._writer is None:
+                os.makedirs(self.logging_dir, exist_ok=True)
+                self._writer = SummaryWriter(log_dir=self.logging_dir)
+        except Exception:
+            self._writer = None
+        model = kwargs.get("model")
+        if model is not None and not self._handles:
+            try:
+                self._register_hooks(model)
+            except Exception:
+                pass
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        # Reset accumulators when a new optimizer step begins
+        step = int(getattr(state, "global_step", 0))
+        if self._seen_step is None or self._seen_step != step:
+            self._acc.clear()
+            self._seen_step = step
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if not control.should_log:
+            return
+        if self._writer is None:
+            return
+        step = int(getattr(state, "global_step", 0))
+        # Aggregate and write
+        try:
+            # Optional: global per-kind aggregator across layers
+            global_kind_acc: DefaultDict[str, Dict[str, float]] = defaultdict(lambda: {"sq_sum": 0.0, "abs_sum": 0.0, "count": 0.0})
+            for (layer_idx, kind), stats in list(self._acc.items()):
+                count = max(1.0, float(stats.get("count", 0.0)))
+                l2 = (float(stats.get("sq_sum", 0.0)) ** 0.5)
+                mean_abs = float(stats.get("abs_sum", 0.0)) / count
+                # Per-layer
+                base = f"{self.tag_prefix}/layer_{layer_idx}/{kind}"
+                try:
+                    self._writer.add_scalar(f"{base}/l2", l2, step)
+                    self._writer.add_scalar(f"{base}/mean_abs", mean_abs, step)
+                except Exception:
+                    pass
+                # Accumulate global per-kind
+                g = global_kind_acc[kind]
+                g["sq_sum"] += float(stats.get("sq_sum", 0.0))
+                g["abs_sum"] += float(stats.get("abs_sum", 0.0))
+                g["count"] += float(stats.get("count", 0.0))
+
+            # Global per-kind
+            for kind, g in global_kind_acc.items():
+                cnt = max(1.0, float(g.get("count", 0.0)))
+                l2 = (float(g.get("sq_sum", 0.0)) ** 0.5)
+                mean_abs = float(g.get("abs_sum", 0.0)) / cnt
+                base = f"{self.tag_prefix}/all_layers/{kind}"
+                try:
+                    self._writer.add_scalar(f"{base}/l2", l2, step)
+                    self._writer.add_scalar(f"{base}/mean_abs", mean_abs, step)
+                except Exception:
+                    pass
+            try:
+                self._writer.flush()
+            except Exception:
+                pass
+        except Exception:
+            # Swallow to avoid disrupting training
+            return
+
+    def on_train_end(self, args, state, control, **kwargs):
+        # Remove hooks and close writer
+        try:
+            for h in self._handles:
+                try:
+                    h.remove()
+                except Exception:
+                    pass
+            self._handles.clear()
+        except Exception:
+            pass
+        try:
+            if self._writer is not None:
+                self._writer.close()
+        except Exception:
+            pass

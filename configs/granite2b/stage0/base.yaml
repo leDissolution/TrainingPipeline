@@ -51,12 +51,12 @@ layerwise_lr:
   groups:
     - name: up
       suffixes: ["mlp.up_proj"]
-      layers: { start: 20, end: 40 }
+      layers: { start: 0, end: 30 }
       lr_scale: 0.33
       force_enable: true
     - name: gate
       suffixes: ["mlp.gate_proj"]
-      layers: { start: 10, end: 40 }
+      layers: { start: 10, end: 30 }
       lr_scale: 0.66
       force_enable: true
     - name: embed
@@ -65,6 +65,8 @@ layerwise_lr:
       weight_decay: 0.0001
 
 training:
+  seed: 42
+  dataset_seed: 3407
   output_dir: "${WORK_BASE}/g2b-stage0"
   merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
   effective_batch_size: 6

@@ -23,8 +23,8 @@ stages:
       param_ranges:
         training.merge_output_dir: [ null ]
         training.seed: [42, 1234, 3407]
-        layerwise_lr.groups["up"].lr_scale: [1, 0.25, 0.0625, 0]
-        layerwise_lr.groups["gate"].lr_scale: [1, 0.25, 0.0625, 0]
+        training.dataset_seed: [42, 1234, 3407]
+        layerwise_lr.groups["up"].layers.start: [0, 10, 20]
 
   - name: stage0
     env_variables:
@@ -33,17 +33,17 @@ stages:
     script:
       name: train.py
       args:
-        --config:
+        --config: #configs/granite2b/stage0/base.yaml
           sweep: configs/granite2b/stage0/lr_boost_rank
 
-  - name: pick_best_stage0
-    select_best:
-      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-      metric: exact_match
-      prefer: max
-      file: last_eval_metrics.json
-      var_name: STAGE0_BEST
-      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+  # - name: pick_best_stage0
+  #   select_best:
+  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+  #     metric: exact_match
+  #     prefer: max
+  #     file: last_eval_metrics.json
+  #     var_name: STAGE0_BEST
+  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
 
   # - name: stage2
   #   env_variables:

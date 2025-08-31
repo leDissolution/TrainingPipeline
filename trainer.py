@@ -182,7 +182,7 @@ class LayerwiseLRTrainer(SFTTrainer):
                     print(f"[Warning] Group '{spec.name}' matched {count} parameters with requires_grad=False. They were not included in optimization.")
         return self.optimizer
 
-    def _get_train_sampler(self):  # type: ignore[override]
+    def _get_train_sampler(self, idk):  # type: ignore[override]
         if self.train_dataset is None:
             return None
         if isinstance(self.train_dataset, IterableDataset):

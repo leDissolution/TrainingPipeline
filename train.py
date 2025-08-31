@@ -13,7 +13,7 @@ from trl import SFTConfig
 
 # Local imports (mirror existing scripts)
 from data_collators import DataCollatorForLastCompletionOnlyLM
-from callbacks import MetricCalculator, PerExampleEvalLogger
+from callbacks import MetricCalculator, PerExampleEvalLogger, GradTensorBoardLogger
 from trainer import (
     GroupSpec,
     LayerwiseLRTrainer,
@@ -719,6 +719,18 @@ def main() -> None:
     try:
         per_ex_logger = PerExampleEvalLogger(metric_calculator, output_dir=logging_dir)
         trainer.add_callback(per_ex_logger)
+    except Exception:
+        pass
+
+    # Optional: gradient TensorBoard logging per layer/kind
+    try:
+        grad_log_cfg = cfg.get("gradient_logging", {}) or {}
+        if bool(grad_log_cfg.get("enabled", False)):
+            glog_dir = str(grad_log_cfg.get("logging_dir", logging_dir))
+            kinds = grad_log_cfg.get("include_kinds", ["self_attn", "mlp"]) or ["self_attn", "mlp"]
+            tag_prefix = str(grad_log_cfg.get("tag_prefix", "grads"))
+            grad_cb = GradTensorBoardLogger(logging_dir=glog_dir, include_kinds=kinds, tag_prefix=tag_prefix)
+            trainer.add_callback(grad_cb)
     except Exception:
         pass
 
