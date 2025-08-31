@@ -794,9 +794,20 @@ def main() -> None:
         print(f"[Warning] Final eval attempt skipped: {e}")
 
     # Merge/save if requested
-    merge_dir = str(train_cfg.get("merge_output_dir", None)).strip()
+    # Note: YAML null should disable merging entirely. Avoid coercing None to "None".
+    _merge_raw = train_cfg.get("merge_output_dir", None)
+    merge_dir: Optional[str] = None
+    if isinstance(_merge_raw, str):
+        _tmp = _merge_raw.strip()
+        if _tmp:
+            merge_dir = _tmp
+    elif _merge_raw:
+        # Allow non-string truthy values, but coerce explicitly
+        merge_dir = str(_merge_raw)
+
     if swipe_name and merge_dir:
         merge_dir = os.path.join(merge_dir, swipe_name)
+
     if merge_dir:
         print("Finished training, merging model...")
         os.makedirs(merge_dir, exist_ok=True)
@@ -851,6 +862,9 @@ def main() -> None:
             print(f"[Cleanup] Removed optimizer.pt from {removed} checkpoint(s) under '{checkpoint_root}'.")
         except Exception as e:
             print(f"[Cleanup] Skipped optimizer cleanup due to error: {e}")
+    else:
+        # Explicitly confirm that merging was skipped when merge_output_dir is null/empty.
+        print("[Merge] Skipped: training.training.merge_output_dir is null/empty.")
 
 
 if __name__ == "__main__":
