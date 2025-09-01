@@ -63,19 +63,19 @@ layerwise_lr:
       force_require_grad: true
     - name: up
       suffixes: ["mlp.up_proj"]
-      layers: { start: 0, end: 30 }
+      layers: { start: 0, end: 40 }
       lr_scale: 0.33
       force_enable: true
     - name: input_layernorm
       suffixes: ["input_layernorm"]
-      layers: { start: 0, end: 30 }
+      layers: { start: 0, end: 40 }
       lr_scale: 0.33
       force_enable: false
       force_require_grad: true
     - name: gate
       suffixes: ["mlp.gate_proj"]
-      layers: { start: 0, end: 30 }
-      lr_scale: 0.66
+      layers: { start: 0, end: 40 }
+      lr_scale: 0.33
       force_enable: true
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
@@ -112,9 +112,9 @@ training:
 loss:
   use_fork_weighed: false
   fork_mask_key: fork_mask
-  fork_alpha: 1
-  force_full_mask: false
+  fork_alpha: 0.5
   mask_generator:
-    type: after_token
+    type: after_special_token
     args:
-      tokens: ["=\"", ",", " ("]
+      tokens: ["=\"", ",", " (", ";"]
+      include_special_tokens: true

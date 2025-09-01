@@ -439,6 +439,7 @@ def main() -> None:
         tokenizer=tokenizer,
         fork_mask_key=str(loss_cfg_for_coll.get("fork_mask_key", "fork_mask")) if bool(loss_cfg_for_coll.get("use_fork_weighed", loss_cfg_for_coll.get("fork_weighed_enabled", False))) else None,
         auto_full_mask=bool(loss_cfg_for_coll.get("force_full_mask", False)),
+        mask_generator=loss_cfg_for_coll.get("mask_generator", None),
     )
 
     # Optional: token additions and gradient boosts

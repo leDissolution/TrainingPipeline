@@ -11,6 +11,7 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
         ignore_index: int = -100,
         fork_mask_key: Union[str, None] = None,
         auto_full_mask: bool = False,
+        mask_generator: Union[dict, None] = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, mlm=mlm, **kwargs)
@@ -22,6 +23,31 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
         self.ignore_index = ignore_index
         self.fork_mask_key = fork_mask_key
         self.auto_full_mask = bool(auto_full_mask)
+        # Optional mask generator config (e.g., {type: "after_special_token", args: {...}})
+        self._mask_gen_cfg = mask_generator if isinstance(mask_generator, dict) else None
+        # Preprocess patterns for after_special_token
+        self._mg_type = None
+        self._mg_patterns: List[List[int]] = []
+        self._mg_include_special: bool = False
+        if self._mask_gen_cfg and str(self._mask_gen_cfg.get("type")) == "after_special_token":
+            self._mg_type = "after_special_token"
+            args = self._mask_gen_cfg.get("args", {}) or {}
+            toks = args.get("tokens", []) or []
+            self._mg_include_special = bool(args.get("include_special_tokens", False))
+            patterns: List[List[int]] = []
+            for t in toks:
+                try:
+                    if isinstance(t, str):
+                        enc = self.tokenizer.encode(t, add_special_tokens=False)
+                    elif isinstance(t, (list, tuple)):
+                        enc = [int(x) for x in t]
+                    else:
+                        enc = []
+                except Exception:
+                    enc = []
+                if enc:
+                    patterns.append(enc)
+            self._mg_patterns = patterns
 
     def torch_call(self, examples: List[Any]) -> Dict[str, Any]:
         batch = super().torch_call(examples)
@@ -69,37 +95,92 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
                 np = None  # type: ignore
 
             B, S = input_ids.shape
-            # Start with ones if auto_full_mask, else zeros and try to fill from examples
-            mask_tensor = torch.ones((B, S), dtype=torch.float32, device=input_ids.device) if self.auto_full_mask else torch.zeros((B, S), dtype=torch.float32, device=input_ids.device)
-            if not self.auto_full_mask:
-                for i, ex in enumerate(examples):
-                    if isinstance(ex, dict) and self.fork_mask_key in ex:
-                        raw = ex[self.fork_mask_key]
-                        vals: List[int] | None = None
-                        try:
-                            if isinstance(raw, torch.Tensor):
-                                vals = raw.detach().cpu().to(torch.int64).view(-1).tolist()
-                            elif np is not None and hasattr(raw, "shape"):
-                                # numpy array
-                                try:
-                                    vals = [int(x) for x in raw.reshape(-1).tolist()]
-                                except Exception:
+            # Strategy precedence:
+            # 1) If mask_generator configured, generate from it.
+            # 2) Else if auto_full_mask, make full ones.
+            # 3) Else, try to pull mask from examples.
+            if self._mg_type == "after_special_token":
+                mask_tensor = torch.zeros((B, S), dtype=torch.float32, device=input_ids.device)
+                eos_id = self.tokenizer.eos_token_id
+                bos_id = getattr(self.tokenizer, "bos_token_id", None)
+                # Collect special ids if requested
+                special_ids: List[int] = []
+                if self._mg_include_special:
+                    try:
+                        special_ids = [int(x) for x in (getattr(self.tokenizer, "all_special_ids", []) or []) if x is not None]
+                    except Exception:
+                        special_ids = []
+                for i in range(B):
+                    seq = input_ids[i].tolist()
+                    # Valid length from attention mask (assume trailing pads)
+                    try:
+                        valid_len = int(attn_mask[i].sum().item())
+                    except Exception:
+                        valid_len = len(seq)
+                    valid_len = max(0, min(valid_len, S))
+                    # 1) Mark configured patterns and the token right after them
+                    for pat in self._mg_patterns:
+                        L = len(pat)
+                        if L == 0 or L > valid_len:
+                            continue
+                        for j in range(0, valid_len - L + 1):
+                            if seq[j:j+L] == pat:
+                                # mark the pattern tokens themselves
+                                mask_tensor[i, j:j+L] = 1.0
+                                # and the token right after the pattern
+                                if j + L < valid_len:
+                                    mask_tensor[i, j+L] = 1.0
+                    # 2) Mark special tokens and the token right after
+                    if special_ids:
+                        for j in range(valid_len):
+                            if int(seq[j]) in special_ids:
+                                mask_tensor[i, j] = 1.0
+                                if j + 1 < valid_len:
+                                    mask_tensor[i, j+1] = 1.0
+                    # 3) Always treat EOS as special (even if not in all_special_ids)
+                    if eos_id is not None:
+                        for j in range(valid_len):
+                            if seq[j] == eos_id:
+                                mask_tensor[i, j] = 1.0
+                                if j + 1 < valid_len:
+                                    mask_tensor[i, j+1] = 1.0
+                    # 4) Optionally BOS
+                    if bos_id is not None and valid_len > 0 and seq[0] == bos_id:
+                        mask_tensor[i, 0] = 1.0
+                        if valid_len > 1:
+                            mask_tensor[i, 1] = 1.0
+                batch[self.fork_mask_key] = mask_tensor
+            else:
+                # Default behavior
+                mask_tensor = torch.ones((B, S), dtype=torch.float32, device=input_ids.device) if self.auto_full_mask else torch.zeros((B, S), dtype=torch.float32, device=input_ids.device)
+                if not self.auto_full_mask:
+                    for i, ex in enumerate(examples):
+                        if isinstance(ex, dict) and self.fork_mask_key in ex:
+                            raw = ex[self.fork_mask_key]
+                            vals: List[int] | None = None
+                            try:
+                                if isinstance(raw, torch.Tensor):
+                                    vals = raw.detach().cpu().to(torch.int64).view(-1).tolist()
+                                elif np is not None and hasattr(raw, "shape"):
+                                    # numpy array
+                                    try:
+                                        vals = [int(x) for x in raw.reshape(-1).tolist()]
+                                    except Exception:
+                                        vals = None
+                                elif isinstance(raw, (list, tuple)):
+                                    vals = [int(x) for x in raw]
+                                else:
                                     vals = None
-                            elif isinstance(raw, (list, tuple)):
-                                vals = [int(x) for x in raw]
-                            else:
+                            except Exception:
                                 vals = None
-                        except Exception:
-                            vals = None
-                        if vals is not None and len(vals) > 0:
-                            # Align length to sequence length
-                            if len(vals) >= S:
-                                use = vals[:S]
-                            else:
-                                use = vals + [0] * (S - len(vals))
-                            mask_tensor[i] = torch.tensor(use, dtype=torch.float32, device=input_ids.device)
-
-            batch[self.fork_mask_key] = mask_tensor
+                            if vals is not None and len(vals) > 0:
+                                # Align length to sequence length
+                                if len(vals) >= S:
+                                    use = vals[:S]
+                                else:
+                                    use = vals + [0] * (S - len(vals))
+                                mask_tensor[i] = torch.tensor(use, dtype=torch.float32, device=input_ids.device)
+                batch[self.fork_mask_key] = mask_tensor
 
         return batch
 
