@@ -1,4 +1,4 @@
-environment: configs/environments/local.yaml
+environment: configs/environments/pod.yaml
 vars:
   MODEL_NAME: "g2b"
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
