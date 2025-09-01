@@ -182,7 +182,7 @@ def add_and_initialize_tokens(
     # Add tokens that don't exist yet (HF tokenizer ignores duplicates)
     tokens_to_add = [t for t, _ in token_inits]
     pre_vocab_size = len(tokenizer)
-    added_count = tokenizer.add_tokens(tokens_to_add)
+    added_count = tokenizer.add_tokens(tokens_to_add, mean_resizing=False)
     if added_count:
         try:
             resize_fn = getattr(model, "resize_token_embeddings", None)
