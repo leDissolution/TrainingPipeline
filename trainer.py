@@ -44,6 +44,9 @@ class GroupSpec:
     lr: Optional[float] = None
     lr_scale: Optional[float] = None
     weight_decay: Optional[float] = None
+    # Optional one-time weight rescale applied to matched parameters before training
+    # Useful for nudging specific layers/modules (e.g., mlp up/down/gate) without code edits
+    weight_rescale: Optional[float] = None
 
 
 def _layer_token(i: int) -> str:
@@ -215,6 +218,7 @@ __all__ = [
     # helpers
     "build_layered_suffixes",
     "build_target_modules",
+    "apply_weight_rescale",
 ]
 
 
@@ -248,3 +252,45 @@ def build_target_modules(
     tm.extend(include_modules)
 
     return tm
+
+
+# ---------------------------------------------------------------------------
+# One-time weight rescale based on GroupSpec matching (first-match-wins)
+# ---------------------------------------------------------------------------
+
+def apply_weight_rescale(model: torch.nn.Module, specs: Sequence[GroupSpec]) -> None:
+    """Multiply parameter tensors by a per-group factor once, if provided.
+
+    Semantics:
+        - First matching spec wins (consistent with optimizer grouping).
+        - Only applies when spec.weight_rescale is not None and != 1.0.
+        - Applies to base weights only (name endswith ".weight"), and skips LoRA adapter
+            parameters (names containing "lora_"), so it is safe to call before or after PEFT.
+    """
+    if not specs:
+        return
+
+    # Precompute which specs actually request a rescale
+    active_specs: List[Tuple[int, GroupSpec]] = [
+        (i, s) for i, s in enumerate(specs)
+        if s.weight_rescale is not None and float(s.weight_rescale) != 1.0
+    ]
+    if not active_specs:
+        return
+
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            # Only scale the base weights, not biases or lora adapter params
+            if not name.endswith(".weight"):
+                continue
+            if "lora_" in name:
+                continue
+            # first-match-wins
+            for _, spec in active_specs:
+                if _name_matches_spec(name, spec):
+                    try:
+                        factor = float(spec.weight_rescale)  # type: ignore[arg-type]
+                        param.mul_(factor)
+                    except Exception:
+                        pass
+                    break

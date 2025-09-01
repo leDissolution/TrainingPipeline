@@ -18,6 +18,7 @@ from trainer import (
     GroupSpec,
     LayerwiseLRTrainer,
     build_target_modules,
+    apply_weight_rescale,
 )
 
 
@@ -548,8 +549,35 @@ def main() -> None:
             lr=float(grp["lr"]) if "lr" in grp else None,
             lr_scale=float(grp["lr_scale"]) if "lr_scale" in grp else None,
             weight_decay=float(grp["weight_decay"]) if "weight_decay" in grp else None,
+            weight_rescale=float(grp["weight_rescale"]) if "weight_rescale" in grp else None,
         )
         group_specs.append(gs)
+
+    # Apply one-time weight rescale before PEFT wrapping so it affects base weights
+    try:
+        apply_weight_rescale(model, group_specs)
+    except Exception:
+        pass
+
+    # Force require_grad on groups without PEFT
+    force_grad_groups = [grp for grp in lwise.get("groups", []) if grp.get("force_require_grad", False)]
+    if force_grad_groups:
+        for grp in force_grad_groups:
+            layers = _expand_layers(grp.get("layers"))
+            suffixes = grp.get("suffixes", []) or []
+            if layers is None:
+                # For non-layered, like embed
+                for suffix in suffixes:
+                    for name, param in model.named_parameters():
+                        if suffix in name:
+                            param.requires_grad = True
+            else:
+                for layer in layers:
+                    for suffix in suffixes:
+                        pattern = f"layers.{layer}.{suffix}"
+                        for name, param in model.named_parameters():
+                            if pattern in name:
+                                param.requires_grad = True
 
     # Batch sizes
     per_device_train_bs = compute_per_device_batch(cfg)
@@ -570,14 +598,13 @@ def main() -> None:
 
     # Output directory (optionally nested by swipe)
     output_dir = str(train_cfg.get("output_dir", "./outputs"))
+    base_run_name = str(train_cfg.get("run_name", "run"))
     if swipe_name:
         output_dir = os.path.join(output_dir, swipe_name)
+    else:
+        output_dir = os.path.join(output_dir, base_run_name)
 
-    # Run name incorporates optional swipe name and timestamp
     timestamp = datetime.now().strftime("%y-%m-%d-%H-%M")
-    base_run_name = str(train_cfg.get("run_name", "run"))
-    # if swipe_name:
-    #     base_run_name = f"{base_run_name}_{swipe_name}"
     run_name = f"{timestamp}"
 
     # Logging dir defaults under the (possibly swipe-namespaced) output_dir

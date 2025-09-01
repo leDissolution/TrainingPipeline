@@ -49,24 +49,37 @@ peft:
 layerwise_lr:
   base_lr: 3.0e-5
   groups:
+    - name: up_gate_special
+      suffixes: ["mlp.gate_proj", "mlp.up_proj"]
+      layers: [0, 9, 13, 18]
+      lr_scale: 1
+      weight_rescale: 0.5
+      force_enable: true
     - name: up
       suffixes: ["mlp.up_proj"]
       layers: { start: 0, end: 30 }
       lr_scale: 0.33
       force_enable: true
+    - name: input_layernorm
+      suffixes: ["input_layernorm"]
+      layers: { start: 0, end: 30 }
+      lr_scale: 0.33
+      force_enable: false
+      force_require_grad: true
     - name: gate
       suffixes: ["mlp.gate_proj"]
-      layers: { start: 10, end: 30 }
+      layers: { start: 0, end: 30 }
       lr_scale: 0.66
       force_enable: true
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
       lr_scale: 0.35
       weight_decay: 0.0001
+      force_require_grad: false
 
 training:
   seed: 42
-  dataset_seed: 3407
+  dataset_seed: 1234
   output_dir: "${WORK_BASE}/g2b-stage0"
   merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
   effective_batch_size: 6

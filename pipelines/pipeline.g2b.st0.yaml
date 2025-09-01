@@ -1,4 +1,4 @@
-environment: configs/environments/pod.yaml
+environment: configs/environments/local.yaml
 vars:
   MODEL_NAME: "g2b"
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
@@ -21,10 +21,7 @@ stages:
       base_config: configs/granite2b/stage0/base.yaml
       name: lr_boost_rank
       param_ranges:
-        training.merge_output_dir: [ null ]
-        training.seed: [42, 1234, 3407]
-        training.dataset_seed: [42, 1234, 3407]
-        layerwise_lr.groups["up"].layers.start: [0, 10, 20]
+        layerwise_lr.groups["up_gate_special"].weight_rescale: [0.25, 0.5]
 
   - name: stage0
     env_variables:
