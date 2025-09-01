@@ -17,6 +17,7 @@ from callbacks import MetricCalculator, PerExampleEvalLogger, GradTensorBoardLog
 from trainer import (
     GroupSpec,
     LayerwiseLRTrainer,
+    ForkWeighedLossTrainer,
     build_target_modules,
     apply_weight_rescale,
 )
@@ -432,7 +433,13 @@ def main() -> None:
     # Collator
     coll_cfg = cfg.get("collator", {})
     completion_marker = str(coll_cfg.get("completion_start_marker", '="'))
-    collator = DataCollatorForLastCompletionOnlyLM(completion_marker, tokenizer=tokenizer)
+    loss_cfg_for_coll = cfg.get("loss", {}) or {}
+    collator = DataCollatorForLastCompletionOnlyLM(
+        completion_marker,
+        tokenizer=tokenizer,
+        fork_mask_key=str(loss_cfg_for_coll.get("fork_mask_key", "fork_mask")) if bool(loss_cfg_for_coll.get("use_fork_weighed", loss_cfg_for_coll.get("fork_weighed_enabled", False))) else None,
+        auto_full_mask=bool(loss_cfg_for_coll.get("force_full_mask", False)),
+    )
 
     # Optional: token additions and gradient boosts
     tokens_cfg = cfg.get("tokens", {}) or {}
@@ -710,6 +717,13 @@ def main() -> None:
             ],
         }
 
+        # Loss/trainer selection (optional)
+        loss_cfg = cfg.get("loss", {}) or {}
+        use_fork_loss = bool(loss_cfg.get("use_fork_weighed", loss_cfg.get("fork_weighed_enabled", False)))
+        fork_alpha = float(loss_cfg.get("fork_alpha", 1.0))
+        fork_mask_key = str(loss_cfg.get("fork_mask_key", "fork_mask"))
+        fork_ignore_index = -100 #int(loss_cfg.get("ignore_index", -100))
+
         payload: Dict[str, Any] = {
             "run": {
                 "swipe_name": swipe_name,
@@ -720,6 +734,13 @@ def main() -> None:
             "trainer": trainer_args_dict,
             "peft": lora_info,
             "layerwise_lr": layerwise_dump,
+            "loss": {
+                "trainer_class": ("ForkWeighedLossTrainer" if use_fork_loss else "LayerwiseLRTrainer"),
+                "use_fork_weighed": use_fork_loss,
+                "fork_alpha": fork_alpha,
+                "fork_mask_key": fork_mask_key,
+                "ignore_index": fork_ignore_index,
+            },
         }
 
         with open(os.path.join(logging_dir, "hparams.json"), "w", encoding="utf-8") as f:
@@ -728,7 +749,12 @@ def main() -> None:
     except Exception as e:
         print(f"[HParams] Failed to write hparams: {e}")
 
-    trainer = LayerwiseLRTrainer(
+    # Select trainer class based on YAML loss.toggle
+    loss_cfg = cfg.get("loss", {}) or {}
+    use_fork_loss = bool(loss_cfg.get("use_fork_weighed", loss_cfg.get("fork_weighed_enabled", False)))
+    trainer_cls = ForkWeighedLossTrainer if use_fork_loss else LayerwiseLRTrainer
+
+    common_kwargs: Dict[str, Any] = dict(
         model=model,
         train_dataset=dataset,
         eval_dataset=eval_dataset,
@@ -741,6 +767,15 @@ def main() -> None:
         args=sft_args,
         dataset_seed=(int(dataset_seed) if dataset_seed is not None else None),
     )
+
+    if trainer_cls is ForkWeighedLossTrainer:
+        common_kwargs.update({
+            "fork_alpha": float(loss_cfg.get("fork_alpha", 1.0)),
+            "fork_mask_key": str(loss_cfg.get("fork_mask_key", "fork_mask")),
+            "ignore_index": int(loss_cfg.get("ignore_index", -100)),
+        })
+
+    trainer = trainer_cls(**common_kwargs)
 
     # Add per-example eval logger (writes JSONL files, not TensorBoard)
     try:

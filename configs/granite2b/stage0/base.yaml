@@ -51,10 +51,16 @@ layerwise_lr:
   groups:
     - name: up_gate_special
       suffixes: ["mlp.gate_proj", "mlp.up_proj"]
-      layers: [0, 9, 13, 18]
+      layers: [0, 13]
       lr_scale: 1
       weight_rescale: 0.5
       force_enable: true
+    - name: layernorms_special
+      suffixes: ["input_layernorm"]
+      layers: [0, 13]
+      lr_scale: 1
+      force_enable: false
+      force_require_grad: true
     - name: up
       suffixes: ["mlp.up_proj"]
       layers: { start: 0, end: 30 }
@@ -98,3 +104,17 @@ training:
   eval_strategy: steps
   eval_steps: 50
   eval_on_start: true
+  merge_output_dir: null
+
+# gradient_logging:
+#   enabled: true
+
+loss:
+  use_fork_weighed: false
+  fork_mask_key: fork_mask
+  fork_alpha: 1
+  force_full_mask: false
+  mask_generator:
+    type: after_token
+    args:
+      tokens: ["=\"", ",", " ("]

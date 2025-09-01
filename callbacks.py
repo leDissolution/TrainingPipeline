@@ -331,21 +331,29 @@ class PerExampleEvalLogger(TrainerCallback):
 class GradTensorBoardLogger(TrainerCallback):
     """Logs gradient stats per layer and module kind (mlp vs self_attn) to TensorBoard.
 
-    Implementation details:
-    - Registers autograd hooks on trainable parameters once at train start.
-    - On each step, aggregates sum of squares and abs sums per (layer_index, kind).
-      Kind is determined from parameter name containing ".mlp." or ".self_attn.".
-    - On logging steps (control.should_log), writes scalars to TB under tags like:
-        grads/layer_{i}/self_attn/l2
-        grads/layer_{i}/self_attn/mean_abs
-        grads/layer_{i}/mlp/l2
-        grads/layer_{i}/mlp/mean_abs
+        Implementation details:
+        - Registers autograd hooks on trainable parameters once at train start.
+        - On each step, aggregates sum of squares and abs sums per (layer_index, kind).
+            Kind is determined from parameter name containing ".mlp." or ".self_attn.".
+        - On logging steps (control.should_log), writes scalars to TB under tags like:
+            grads/layer_{i}/self_attn/l2
+            grads/layer_{i}/self_attn/mean_abs
+            grads/layer_{i}/mlp/l2
+            grads/layer_{i}/mlp/mean_abs
 
-    Notes:
-    - Overhead: scans each gradient tensor once via simple reductions.
-    - Safe with gradient accumulation: hooks see every backward; we reset
-      accumulators at step begin so stats reflect the current optimizer step.
-    """
+        Logging location behavior:
+        - By default, this callback writes into the SAME TensorBoard run directory as the
+            Trainer's built-in TensorBoardCallback (args.logging_dir), using a distinct
+            filename suffix (e.g., "events...grads"). This ensures both logs appear together
+            in TensorBoard without overwriting each other.
+        - You can override the directory via `logging_dir` or disable reuse of
+            `args.logging_dir` by setting `use_trainer_logging_dir=False`.
+
+        Notes:
+        - Overhead: scans each gradient tensor once via simple reductions.
+        - Safe with gradient accumulation: hooks see every backward; we reset
+            accumulators at step begin so stats reflect the current optimizer step.
+        """
 
     # Class-level annotations for static analysis
     _writer: Optional[SummaryWriter]
@@ -355,14 +363,19 @@ class GradTensorBoardLogger(TrainerCallback):
 
     def __init__(
         self,
-        logging_dir: str,
+        logging_dir: Optional[str] = None,
         include_kinds: Iterable[str] = ("self_attn", "mlp"),
         tag_prefix: str = "grads",
+        use_trainer_logging_dir: bool = True,
+        filename_suffix: str = ".grads",
     ) -> None:
         super().__init__()
-        self.logging_dir = str(logging_dir)
+        # May be None; resolved on train begin using args.logging_dir if requested
+        self.logging_dir = str(logging_dir) if logging_dir is not None else None
         self.include_kinds = {str(k) for k in include_kinds}
         self.tag_prefix = str(tag_prefix).strip() or "grads"
+        self.use_trainer_logging_dir = bool(use_trainer_logging_dir)
+        self.filename_suffix = str(filename_suffix)
         self._writer = None  # type: ignore[assignment]
         # (layer_idx:int, kind:str) -> {sq_sum:float, abs_sum:float, count:float}
         self._acc = defaultdict(lambda: {"sq_sum": 0.0, "abs_sum": 0.0, "count": 0.0})  # type: ignore[assignment]
@@ -418,8 +431,22 @@ class GradTensorBoardLogger(TrainerCallback):
         # Create writer lazily and hook parameters
         try:
             if self._writer is None:
-                os.makedirs(self.logging_dir, exist_ok=True)
-                self._writer = SummaryWriter(log_dir=self.logging_dir)
+                # Resolve effective log directory
+                effective_dir = None
+                if self.use_trainer_logging_dir and hasattr(args, "logging_dir") and getattr(args, "logging_dir"):
+                    effective_dir = str(getattr(args, "logging_dir"))
+                elif self.logging_dir is not None:
+                    effective_dir = self.logging_dir
+                else:
+                    # Fallback to common default: <output_dir>/runs
+                    base = getattr(args, "output_dir", None)
+                    if base:
+                        effective_dir = os.path.join(str(base), "runs")
+                if effective_dir is None:
+                    # Final safety: current working directory "runs"
+                    effective_dir = os.path.join(os.getcwd(), "runs")
+                os.makedirs(effective_dir, exist_ok=True)
+                self._writer = SummaryWriter(log_dir=effective_dir, filename_suffix=self.filename_suffix)
         except Exception:
             self._writer = None
         model = kwargs.get("model")

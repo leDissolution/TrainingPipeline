@@ -1,9 +1,18 @@
 from typing import Union, Any, Dict, List
 import torch
-from transformers import DataCollatorForLanguageModeling
+from transformers.data.data_collator import DataCollatorForLanguageModeling
 
 class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
-    def __init__(self, response_template: Union[str, list[int]], *args, mlm: bool = False, ignore_index: int = -100, **kwargs):
+    def __init__(
+        self,
+        response_template: Union[str, list[int]],
+        *args,
+        mlm: bool = False,
+        ignore_index: int = -100,
+        fork_mask_key: Union[str, None] = None,
+        auto_full_mask: bool = False,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, mlm=mlm, **kwargs)
         self.response_token_ids = (
             self.tokenizer.encode(response_template, add_special_tokens=False)
@@ -11,8 +20,10 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
             else response_template
         )
         self.ignore_index = ignore_index
+        self.fork_mask_key = fork_mask_key
+        self.auto_full_mask = bool(auto_full_mask)
 
-    def torch_call(self, examples: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def torch_call(self, examples: List[Any]) -> Dict[str, Any]:
         batch = super().torch_call(examples)
         input_ids = batch["input_ids"]
         labels    = batch["labels"]
@@ -49,6 +60,47 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
                     break
 
         batch["labels"] = labels
+
+        # Optionally forward a per-token mask from dataset examples
+        if self.fork_mask_key:
+            try:
+                import numpy as np  # optional, only if dataset stores numpy arrays
+            except Exception:
+                np = None  # type: ignore
+
+            B, S = input_ids.shape
+            # Start with ones if auto_full_mask, else zeros and try to fill from examples
+            mask_tensor = torch.ones((B, S), dtype=torch.float32, device=input_ids.device) if self.auto_full_mask else torch.zeros((B, S), dtype=torch.float32, device=input_ids.device)
+            if not self.auto_full_mask:
+                for i, ex in enumerate(examples):
+                    if isinstance(ex, dict) and self.fork_mask_key in ex:
+                        raw = ex[self.fork_mask_key]
+                        vals: List[int] | None = None
+                        try:
+                            if isinstance(raw, torch.Tensor):
+                                vals = raw.detach().cpu().to(torch.int64).view(-1).tolist()
+                            elif np is not None and hasattr(raw, "shape"):
+                                # numpy array
+                                try:
+                                    vals = [int(x) for x in raw.reshape(-1).tolist()]
+                                except Exception:
+                                    vals = None
+                            elif isinstance(raw, (list, tuple)):
+                                vals = [int(x) for x in raw]
+                            else:
+                                vals = None
+                        except Exception:
+                            vals = None
+                        if vals is not None and len(vals) > 0:
+                            # Align length to sequence length
+                            if len(vals) >= S:
+                                use = vals[:S]
+                            else:
+                                use = vals + [0] * (S - len(vals))
+                            mask_tensor[i] = torch.tensor(use, dtype=torch.float32, device=input_ids.device)
+
+            batch[self.fork_mask_key] = mask_tensor
+
         return batch
 
 class DataCollatorLastCompWithHeadDropout(DataCollatorForLastCompletionOnlyLM):

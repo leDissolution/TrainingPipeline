@@ -17,9 +17,11 @@ from __future__ import annotations
 
 from typing import Iterable, List, Sequence, Tuple, Dict, Any, Optional, cast, Sized
 from dataclasses import dataclass
+import os
 
 import torch
 from trl import SFTTrainer
+import torch.nn.functional as F
 from torch.utils.data import RandomSampler, DistributedSampler, IterableDataset
 
 # ---------------------------------------------------------------------------
@@ -219,6 +221,8 @@ __all__ = [
     "build_layered_suffixes",
     "build_target_modules",
     "apply_weight_rescale",
+    # custom trainers
+    "ForkWeighedLossTrainer",
 ]
 
 
@@ -294,3 +298,79 @@ def apply_weight_rescale(model: torch.nn.Module, specs: Sequence[GroupSpec]) -> 
                     except Exception:
                         pass
                     break
+
+
+# ---------------------------------------------------------------------------
+# Custom trainer: per-token loss weighting via example mask ("fork")
+# ---------------------------------------------------------------------------
+
+class ForkWeighedLossTrainer(LayerwiseLRTrainer):
+    def __init__(
+        self,
+        *args,
+        fork_alpha: float = 1.0,
+        fork_mask_key: str = "fork_mask",
+        ignore_index: int = -100,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._fork_alpha = float(fork_alpha)
+        self._fork_mask_key = str(fork_mask_key)
+        self._ignore_index = int(ignore_index)
+
+    def compute_loss(  # type: ignore[override]
+        self,
+        model: torch.nn.Module,
+        inputs: Dict[str, Any],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[int] = None,
+    ):
+        fork_mask = inputs.pop(self._fork_mask_key, None)
+
+        labels = inputs.get("labels", None)
+        outputs = model(**inputs)
+
+        if labels is None:
+            raise ValueError("ForkWeighedLossTrainer requires 'labels' in inputs to compute loss.")
+
+        logit_scale = float(model.config.logits_scaling) if hasattr(model.config, "logits_scaling") else 1.0 # type: ignore[arg-type]
+
+        logits = outputs["logits"] if isinstance(outputs, dict) else outputs.logits
+        loss = self._fork_weighted_shifted_loss(logits, labels, fork_mask, logit_divider=logit_scale)
+        return (loss, outputs) if return_outputs else loss
+
+    def _fork_weighted_shifted_loss(
+            self,
+            logits: torch.Tensor,
+            labels: torch.Tensor,
+            fork_mask: Optional[torch.Tensor],
+            logit_divider: float = 1.0
+    ) -> torch.Tensor:
+        if logit_divider != 0:
+            logits = logits / logit_divider
+
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        vocab = shift_logits.size(-1)
+
+        per_token = F.cross_entropy(
+            shift_logits.float().view(-1, vocab),
+            shift_labels.view(-1),
+            ignore_index=self._ignore_index,
+            reduction="none",
+        ).view_as(shift_labels).float()
+
+        # Robust mask handling: if no fork_mask provided, treat as all False (apply alpha everywhere)
+        if fork_mask is None:
+            shift_mask = torch.zeros_like(shift_labels, dtype=torch.bool)
+        else:
+            shift_mask = fork_mask[..., 1:].contiguous().bool()
+        token_w = torch.where(shift_mask, torch.ones_like(per_token), torch.full_like(per_token, self._fork_alpha))
+
+        valid = (shift_labels != self._ignore_index)
+        token_w = token_w * valid
+        num = (per_token * token_w).sum(dtype=torch.float32)
+        den = valid.sum(dtype=torch.float32).clamp_min(1)
+        loss = num / den
+
+        return loss
