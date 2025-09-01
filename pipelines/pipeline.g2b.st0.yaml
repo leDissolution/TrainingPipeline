@@ -22,8 +22,8 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999]
-        loss.use_fork_weighed: [true, false]
-        loss.fork_alpha: [0.7]
+        loss.use_fork_weighed: [true]
+        loss.fork_alpha: [0.5]
 
   - name: stage0
     env_variables:
