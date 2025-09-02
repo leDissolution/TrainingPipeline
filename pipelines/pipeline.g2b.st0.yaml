@@ -22,7 +22,8 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999]
-        layerwise_lr.groups["q_proj"].lr_scale: [1.0, 2.0, 4.0]
+        layerwise_lr.groups["up_gate_special"].lr_scale: [0.33, 1, 3]
+        layerwise_lr.groups["layernorms_special"].lr_scale: [0.33, 1]
 
   - name: stage0
     env_variables:
