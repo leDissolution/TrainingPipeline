@@ -656,6 +656,8 @@ def main() -> None:
     )
 
     # Persist hyperparameters (+ LoRA) to JSON in the logging directory
+    hparams: Dict[str, Any] = {}
+
     try:
         os.makedirs(logging_dir, exist_ok=True)
 
@@ -725,7 +727,7 @@ def main() -> None:
         fork_mask_key = str(loss_cfg.get("fork_mask_key", "fork_mask"))
         fork_ignore_index = -100 #int(loss_cfg.get("ignore_index", -100))
 
-        payload: Dict[str, Any] = {
+        hparams = {
             "run": {
                 "swipe_name": swipe_name,
                 "run_name": run_name,
@@ -745,7 +747,7 @@ def main() -> None:
         }
 
         with open(os.path.join(logging_dir, "hparams.json"), "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+            json.dump(hparams, f, ensure_ascii=False, indent=2)
         print(f"[HParams] Wrote hyperparameters to {os.path.join(logging_dir, 'hparams.json')}")
     except Exception as e:
         print(f"[HParams] Failed to write hparams: {e}")
@@ -902,6 +904,9 @@ def main() -> None:
             with open(metrics_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             print(f"[Eval] Wrote last eval metrics to: {metrics_path}")
+
+            with open(os.path.join(merge_dir, "hparams.json"), "w", encoding="utf-8") as f:
+                json.dump(hparams, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[Warning] Could not write last eval metrics JSON: {e}")
 
