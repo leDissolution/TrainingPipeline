@@ -51,14 +51,14 @@ layerwise_lr:
   groups:
     - name: up_gate_special
       suffixes: ["mlp.gate_proj", "mlp.up_proj"]
-      layers: [0, 13]
+      layers: [0, 13, 39]
       lr_scale: 1
       weight_rescale: 0.5
       force_enable: true
     - name: layernorms_special
       suffixes: ["input_layernorm"]
-      layers: [0, 13]
-      lr_scale: 1
+      layers: [0, 13, 39]
+      lr_scale: 0.66
       force_enable: false
       force_require_grad: true
     - name: up
