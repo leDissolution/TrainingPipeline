@@ -52,7 +52,8 @@ layerwise_lr:
 
 training:
   output_dir: "${WORK_BASE}/g2b-stage1"
-  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage1"
+  #merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage1"
+  merge_output_dir: null
   effective_batch_size: 14
   gradient_accumulation_steps: 1
   warmup_ratio: 0.25

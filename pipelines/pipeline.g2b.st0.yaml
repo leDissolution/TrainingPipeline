@@ -22,7 +22,6 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999]
-        training.run_name: ["39"]
 
   - name: stage0
     env_variables:
@@ -34,14 +33,33 @@ stages:
         --config: #configs/granite2b/stage0/base.yaml
           sweep: configs/granite2b/stage0/lr_boost_rank
 
-  # - name: pick_best_stage0
-  #   select_best:
-  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-  #     metric: exact_match
-  #     prefer: max
-  #     file: last_eval_metrics.json
-  #     var_name: STAGE0_BEST
-  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+  - name: pick_best_stage0
+    select_best:
+      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+      metric: exact_match
+      prefer: max
+      file: last_eval_metrics.json
+      var_name: STAGE0_BEST
+      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+
+  - name: stage1_make_sweeps
+    make_sweeps:
+      base_config: configs/granite2b/stage1/base.yaml
+      name: gate_lr
+      param_ranges:
+        training.seed: [42, 1234, 3407, 5678, 9999]
+        lr_scheduler_kwargs.min_lr_rate: [0.25, 0.1]
+        warmup_ratio: [0.1, 0.25]
+
+  - name: stage1
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 0
+    script:
+      name: train.py
+      args:
+        --config:
+          sweep: ${CONFIG_BASE}/granite2b/stage1/gate_lr
 
   # - name: stage2
   #   env_variables:
