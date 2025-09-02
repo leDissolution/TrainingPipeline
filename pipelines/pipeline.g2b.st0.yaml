@@ -22,8 +22,7 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999]
-        layerwise_lr.groups["gate"].lr_scale: [0.11, 0.33, 1.0]
-        layerwise_lr.groups["gate"].layers.end: [30, 40]
+        layerwise_lr.groups["input_layernorm"].lr_scale: [0, 0.11, 0.33, 1.0]
 
   - name: stage0
     env_variables:
