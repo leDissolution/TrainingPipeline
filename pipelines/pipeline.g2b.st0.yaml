@@ -16,22 +16,22 @@ stages:
         --with_synthetic: true
         --clean: true
 
-  - name: stage0_make_sweeps
-    make_sweeps:
-      base_config: configs/granite2b/stage0/base.yaml
-      name: lr_boost_rank
-      param_ranges:
-        training.seed: [42, 1234, 3407, 5678, 9999]
+  # - name: stage0_make_sweeps
+  #   make_sweeps:
+  #     base_config: configs/granite2b/stage0/base.yaml
+  #     name: lr_boost_rank
+  #     param_ranges:
+  #       training.seed: [42, 1234, 3407, 5678, 9999]
 
-  - name: stage0
-    env_variables:
-      - name: CUDA_VISIBLE_DEVICES
-        value: 0
-    script:
-      name: train.py
-      args:
-        --config: #configs/granite2b/stage0/base.yaml
-          sweep: configs/granite2b/stage0/lr_boost_rank
+  # - name: stage0
+  #   env_variables:
+  #     - name: CUDA_VISIBLE_DEVICES
+  #       value: 0
+  #   script:
+  #     name: train.py
+  #     args:
+  #       --config: #configs/granite2b/stage0/base.yaml
+  #         sweep: configs/granite2b/stage0/lr_boost_rank
 
   - name: pick_best_stage0
     select_best:
