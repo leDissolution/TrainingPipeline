@@ -1,4 +1,0 @@
-extends: ..\base.yaml
-swipe_name: seed-v42
-training:
-  seed: 42
