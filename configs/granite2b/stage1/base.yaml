@@ -38,12 +38,12 @@ layerwise_lr:
   groups:
     - name: up
       suffixes: ["mlp.up_proj"]
-      layers: { start: 20, end: 29 }
+      layers: { start: 10, end: 29 }
       lr_scale: 0.5
       force_enable: true
     - name: gate
       suffixes: ["mlp.gate_proj"]
-      layers: { start: 20, end: 29 }
+      layers: { start: 10, end: 29 }
       lr_scale: 0.5
       force_enable: true
     - name: embed
@@ -73,3 +73,13 @@ training:
   eval_strategy: steps
   eval_steps: 50
   eval_on_start: true
+
+loss:
+  use_fork_weighed: true
+  fork_mask_key: fork_mask
+  fork_alpha: 0.5
+  mask_generator:
+    type: after_special_token
+    args:
+      tokens: ["=\"", ",", " (", ";"]
+      include_special_tokens: true
