@@ -74,6 +74,9 @@ class MetricCalculator:
         self.example_ids: Optional[List[Any]] = list(example_ids) if example_ids is not None else None
         # Last per-example success flags (populated on every compute_metrics call)
         self.last_per_example_success: Optional[List[bool]] = None
+        # Last per-example tokens (decoded) for actual predictions and expected refs
+        self.last_per_example_pred_tokens: Optional[List[List[str]]] = None
+        self.last_per_example_ref_tokens: Optional[List[List[str]]] = None
         # Text helpers
         self.closing_suffix = '" />'
         try:
@@ -176,7 +179,7 @@ class MetricCalculator:
             # Fall back to decoding labels to get refs
             _, refs = self._decode_completions(pred_ids, label_ids)
 
-        # 3) helpers for text metrics
+    # 3) helpers for text metrics
         def partial_score(p, r, separators):
             def split_multi(s, seps):
                 for sep in seps:
@@ -258,6 +261,58 @@ class MetricCalculator:
         except Exception:
             self.last_per_example_success = None
 
+        # Stash per-example decoded token arrays for predictions and expected references
+        try:
+            # Actual (predicted) tokens: decode from predicted completion id sequences
+            pred_tok_lists: List[List[str]] = []
+            for seq in pred_seqs_ids:
+                try:
+                    pred_tok_lists.append(list(self.tok.convert_ids_to_tokens(seq)))
+                except Exception:
+                    pred_tok_lists.append([])
+
+            # Expected tokens: prefer refs used for comparison (expected_values if provided),
+            # otherwise decode from label completion id sequences
+            ref_tok_lists: List[List[str]] = []
+            if self.expected_values is not None:
+                try:
+                    # Tokenize refs text without adding special tokens, then map to tokens
+                    tokenized = self.tok(refs, add_special_tokens=False)
+                    ids_lists = tokenized.get("input_ids", []) if isinstance(tokenized, dict) else []
+                    if isinstance(ids_lists, list) and ids_lists and isinstance(ids_lists[0], list):
+                        for ids in ids_lists[: len(pred_tok_lists)]:
+                            try:
+                                ref_tok_lists.append(list(self.tok.convert_ids_to_tokens(ids)))
+                            except Exception:
+                                ref_tok_lists.append([])
+                    else:
+                        # Fallback: per-ref encode
+                        for r in refs[: len(pred_tok_lists)]:
+                            try:
+                                ids = self.tok.encode(r, add_special_tokens=False)
+                                ref_tok_lists.append(list(self.tok.convert_ids_to_tokens(ids)))
+                            except Exception:
+                                ref_tok_lists.append([])
+                except Exception:
+                    # Fallback to label-based tokens on failure
+                    for seq in label_seqs_ids[: len(pred_tok_lists)]:
+                        try:
+                            ref_tok_lists.append(list(self.tok.convert_ids_to_tokens(seq)))
+                        except Exception:
+                            ref_tok_lists.append([])
+            else:
+                for seq in label_seqs_ids[: len(pred_tok_lists)]:
+                    try:
+                        ref_tok_lists.append(list(self.tok.convert_ids_to_tokens(seq)))
+                    except Exception:
+                        ref_tok_lists.append([])
+
+            self.last_per_example_pred_tokens = pred_tok_lists
+            self.last_per_example_ref_tokens = ref_tok_lists
+        except Exception:
+            self.last_per_example_pred_tokens = None
+            self.last_per_example_ref_tokens = None
+
         # Grouped exact match by attr if provided
         if self.target_attrs is not None:
             attrs = self.target_attrs
@@ -289,9 +344,10 @@ class MetricCalculator:
 
 
 class PerExampleEvalLogger(TrainerCallback):
-    """Writes per-example success flags to JSONL per evaluation.
+    """Writes per-example results to JSONL per evaluation.
 
-    Each line: {"id": <dataset id>, "success": <bool>}.
+    Each line contains at least:
+        {"id": <dataset id>, "success": <bool>, "expected_tokens": [...], "actual_tokens": [...]}.
     Files are stored under `<output_dir>/per_example_eval/eval_step_<global_step>.jsonl`.
     """
 
@@ -308,6 +364,8 @@ class PerExampleEvalLogger(TrainerCallback):
         try:
             flags = getattr(self.metric_calculator, "last_per_example_success", None)
             ids = getattr(self.metric_calculator, "example_ids", None)
+            exp_tok = getattr(self.metric_calculator, "last_per_example_ref_tokens", None)
+            act_tok = getattr(self.metric_calculator, "last_per_example_pred_tokens", None)
             if not flags or not isinstance(flags, list):
                 return
             # Align ids length if available
@@ -317,11 +375,26 @@ class PerExampleEvalLogger(TrainerCallback):
                 # Synthesize sequential indices if ids missing
                 ids_use = list(range(len(flags)))
 
+            # Align tokens if available; else use empty lists
+            def _align_tok(lst):
+                if isinstance(lst, list) and len(lst) >= len(flags):
+                    return lst[: len(flags)]
+                # Default to empty lists per example
+                return [[] for _ in range(len(flags))]
+
+            exp_tok_use = _align_tok(exp_tok)
+            act_tok_use = _align_tok(act_tok)
+
             step = int(getattr(state, "global_step", 0))
             path = os.path.join(self.base_dir, f"eval_step_{step}.jsonl")
             with open(path, "w", encoding="utf-8") as f:
-                for i, ok in zip(ids_use, flags):
-                    rec = {"id": i, "success": bool(ok)}
+                for idx, (i, ok) in enumerate(zip(ids_use, flags)):
+                    rec = {
+                        "id": i,
+                        "success": bool(ok),
+                        "expected_tokens": list(exp_tok_use[idx]) if idx < len(exp_tok_use) else [],
+                        "actual_tokens": list(act_tok_use[idx]) if idx < len(act_tok_use) else [],
+                    }
                     f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         except Exception:
             # Non-fatal: avoid breaking training due to logging issues
@@ -679,3 +752,12 @@ class ForkAlphaScheduler(TrainerCallback):
                 self._writer.close()
         except Exception:
             pass
+
+class LogSamplerOrder(TrainerCallback):
+    def __init__(self, trainer):
+        self.trainer = trainer
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        sampler = self.trainer._get_train_sampler()
+        order = list(iter(sampler))[:20]
+        print(f"[seed={getattr(self.trainer, '_dataset_seed', None)}] first 20 indices:", order)

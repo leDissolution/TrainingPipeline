@@ -13,7 +13,7 @@ from trl import SFTConfig
 
 # Local imports (mirror existing scripts)
 from data_collators import DataCollatorForLastCompletionOnlyLM
-from callbacks import MetricCalculator, PerExampleEvalLogger, GradTensorBoardLogger
+from callbacks import MetricCalculator, PerExampleEvalLogger, GradTensorBoardLogger, LogSamplerOrder
 from trainer import (
     GroupSpec,
     LayerwiseLRTrainer,
@@ -831,6 +831,8 @@ def main() -> None:
                     pass
     except Exception:
         pass
+
+    #trainer.add_callback(LogSamplerOrder(trainer))
 
     trainer.train(resume_from_checkpoint=False)
 
