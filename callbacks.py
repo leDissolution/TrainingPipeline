@@ -1,5 +1,5 @@
 from transformers.trainer_callback import TrainerCallback
-from typing import List, Tuple, Optional, Any, Dict, DefaultDict, Iterable
+from typing import List, Tuple, Optional, Any, Dict, DefaultDict, Iterable, Callable
 import os
 import json
 
@@ -520,6 +520,160 @@ class GradTensorBoardLogger(TrainerCallback):
             self._handles.clear()
         except Exception:
             pass
+        try:
+            if self._writer is not None:
+                self._writer.close()
+        except Exception:
+            pass
+
+
+class ForkAlphaScheduler(TrainerCallback):
+    """Schedules trainer._fork_alpha over steps and logs it to TensorBoard.
+
+    Config schema (YAML under loss.fork_alpha_schedule):
+      type: "linear" | "cosine" | "constant"
+      args:
+        start_rate: float   # multiplier of base alpha at schedule start
+        end_rate: float     # multiplier at schedule end
+        start_step: float   # fraction of total steps where schedule begins (0..1)
+        end_step: float     # fraction of total steps where schedule ends (0..1)
+
+    Notes:
+    - For type == constant, args are ignored; alpha stays at base_alpha.
+    - Outside [start_step, end_step], alpha clamps to start_rate*base or end_rate*base.
+    - Writes a scalar "fork_alpha" at logging steps, alongside loss.
+    """
+
+    def __init__(
+        self,
+        base_alpha: float,
+        sched_type: str,
+        args: Optional[Dict[str, float]] = None,
+        on_update: Optional[Callable[[float], None]] = None,
+        logging_dir: Optional[str] = None,
+        use_trainer_logging_dir: bool = True,
+        filename_suffix: str = ".fork_alpha",
+    ) -> None:
+        super().__init__()
+        self.base_alpha = float(base_alpha)
+        self.sched_type = str(sched_type or "constant").lower()
+        self.args = dict(args or {})
+        self._writer: Optional[SummaryWriter] = None
+        self._total_steps: int = 0
+        self._current_alpha: float = float(base_alpha)
+        self._on_update = on_update
+        self.logging_dir = str(logging_dir) if logging_dir is not None else None
+        self.use_trainer_logging_dir = bool(use_trainer_logging_dir)
+        self.filename_suffix = str(filename_suffix)
+
+    # ---- internals ----
+    def _resolve_total_steps(self, args, state) -> int:
+        try:
+            ms = int(getattr(state, "max_steps", 0) or 0)
+            if ms and ms > 0:
+                return ms
+        except Exception:
+            pass
+        try:
+            ms = int(getattr(args, "max_steps", 0) or 0)
+            if ms and ms > 0:
+                return ms
+        except Exception:
+            pass
+        return 1
+
+    def _calc_rate(self, step: int) -> float:
+        if self.sched_type == "constant":
+            return 1.0
+
+        # Pull with defaults
+        start_rate = float(self.args.get("start_rate", 1.0))
+        end_rate = float(self.args.get("end_rate", 1.0))
+        start_frac = float(self.args.get("start_step", 0.0))
+        end_frac = float(self.args.get("end_step", 1.0))
+
+        # Guard rails
+        start_frac = max(0.0, min(1.0, start_frac))
+        end_frac = max(0.0, min(1.0, end_frac))
+        if end_frac < start_frac:
+            start_frac, end_frac = end_frac, start_frac
+
+        s0 = int(round(start_frac * self._total_steps))
+        s1 = int(round(end_frac * self._total_steps))
+        s1 = max(s1, s0 + 1)
+
+        if step <= s0:
+            return start_rate
+        if step >= s1:
+            return end_rate
+
+        # Progress in [0,1]
+        t = (step - s0) / max(1, (s1 - s0))
+        if self.sched_type == "linear":
+            return start_rate + t * (end_rate - start_rate)
+        elif self.sched_type == "cosine":
+            # Cosine interpolation between start_rate and end_rate
+            # rate = start + (1 - cos(pi*t))/2 * (end-start)
+            try:
+                import math
+                return start_rate + 0.5 * (1.0 - math.cos(math.pi * t)) * (end_rate - start_rate)
+            except Exception:
+                return start_rate + t * (end_rate - start_rate)
+        else:
+            # Fallback to linear if unknown type
+            return start_rate + t * (end_rate - start_rate)
+
+    def _update_alpha(self, step: int) -> None:
+        rate = self._calc_rate(step)
+        self._current_alpha = float(self.base_alpha * rate)
+        # Propagate to owner via callback
+        try:
+            if self._on_update is not None:
+                self._on_update(self._current_alpha)
+        except Exception:
+            pass
+
+    # ---- callbacks ----
+    def on_train_begin(self, args, state, control, **kwargs):
+        # Setup writer
+        try:
+            if self._writer is None:
+                effective_dir = None
+                if self.use_trainer_logging_dir and hasattr(args, "logging_dir") and getattr(args, "logging_dir"):
+                    effective_dir = str(getattr(args, "logging_dir"))
+                elif self.logging_dir is not None:
+                    effective_dir = self.logging_dir
+                else:
+                    base = getattr(args, "output_dir", None)
+                    if base:
+                        effective_dir = os.path.join(str(base), "runs")
+                if effective_dir is None:
+                    effective_dir = os.path.join(os.getcwd(), "runs")
+                os.makedirs(effective_dir, exist_ok=True)
+                self._writer = SummaryWriter(log_dir=effective_dir, filename_suffix=self.filename_suffix)
+        except Exception:
+            self._writer = None
+
+        # Resolve total steps and prime current alpha
+        self._total_steps = self._resolve_total_steps(args, state)
+        self._update_alpha(int(getattr(state, "global_step", 0) or 0))
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        self._update_alpha(int(getattr(state, "global_step", 0) or 0))
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if not control.should_log:
+            return
+        if self._writer is None:
+            return
+        step = int(getattr(state, "global_step", 0) or 0)
+        try:
+            self._writer.add_scalar("train/fork_alpha", float(self._current_alpha), step)
+            self._writer.flush()
+        except Exception:
+            pass
+
+    def on_train_end(self, args, state, control, **kwargs):
         try:
             if self._writer is not None:
                 self._writer.close()

@@ -1,0 +1,34 @@
+environment: configs/environments/local.yaml
+vars:
+  MODEL_NAME: "g2b"
+  DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
+
+stages:
+  - name: prepare_dataset
+    script:
+      name: ../DatasetProcessor/prepare_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --out_path: "${DATASET}"
+        --with_loss: false
+        --with_chats: false
+        --with_synthetic: true
+        --clean: true
+
+  - name: stage0_make_sweeps
+    make_sweeps:
+      base_config: configs/granite2b/stage0/base.yaml
+      name: lr_boost_rank
+      param_ranges:
+        training.seed: [42]
+
+  - name: stage0
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 0
+    script:
+      name: train.py
+      args:
+        --config: #configs/granite2b/stage0/base.yaml
+          sweep: configs/granite2b/stage0/lr_boost_rank

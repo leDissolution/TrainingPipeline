@@ -743,6 +743,7 @@ def main() -> None:
                 "fork_alpha": fork_alpha,
                 "fork_mask_key": fork_mask_key,
                 "ignore_index": fork_ignore_index,
+                "fork_alpha_schedule": (loss_cfg.get("fork_alpha_schedule", None) or None),
             },
         }
 
@@ -796,6 +797,38 @@ def main() -> None:
             tag_prefix = str(grad_log_cfg.get("tag_prefix", "grads"))
             grad_cb = GradTensorBoardLogger(logging_dir=glog_dir, include_kinds=kinds, tag_prefix=tag_prefix)
             trainer.add_callback(grad_cb)
+    except Exception:
+        pass
+
+    # Optional: fork_alpha scheduler + TB logging
+    try:
+        loss_cfg = cfg.get("loss", {}) or {}
+        sched_cfg = loss_cfg.get("fork_alpha_schedule", None)
+        if trainer_cls is ForkWeighedLossTrainer and sched_cfg:
+            from callbacks import ForkAlphaScheduler
+            sched_type = str(sched_cfg.get("type", "constant").split("|")[0]).strip() if isinstance(sched_cfg.get("type"), str) else str(sched_cfg.get("type", "constant"))
+            # If user writes "linear | cosine | constant", pick from YAML elsewhere; here assume explicit like "linear"
+            # We'll accept exact string and fallback to constant.
+            if sched_type in ("linear", "cosine", "constant"):
+                base_alpha = float(loss_cfg.get("fork_alpha", 1.0))
+                def _set_alpha(a: float) -> None:
+                    try:
+                        setattr(trainer, "_fork_alpha", float(a))
+                    except Exception:
+                        pass
+                scheduler_cb = ForkAlphaScheduler(
+                    base_alpha=base_alpha,
+                    sched_type=sched_type,
+                    args=(sched_cfg.get("args", None) or {}),
+                    on_update=_set_alpha,
+                    logging_dir=logging_dir,
+                    use_trainer_logging_dir=True,
+                    filename_suffix=".fork_alpha",
+                )
+                try:
+                    trainer.add_callback(scheduler_cb)
+                except Exception:
+                    pass
     except Exception:
         pass
 

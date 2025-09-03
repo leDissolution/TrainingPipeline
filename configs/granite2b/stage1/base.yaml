@@ -78,6 +78,13 @@ loss:
   use_fork_weighed: true
   fork_mask_key: fork_mask
   fork_alpha: 0.5
+  fork_alpha_schedule:
+    type: linear | cosine | constant
+    args:
+      start_rate: 0 # ratio of alpha
+      end_rate: 1.0
+      start_step: 0.1 # ratio of total steps
+      end_step: 0.8
   mask_generator:
     type: after_special_token
     args:

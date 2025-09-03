@@ -105,8 +105,8 @@ training:
   eval_steps: 50
   eval_on_start: true
 
-# gradient_logging:
-#   enabled: true
+gradient_logging:
+  enabled: true
 
 loss:
   use_fork_weighed: false
