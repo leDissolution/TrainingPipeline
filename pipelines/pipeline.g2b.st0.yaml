@@ -48,9 +48,7 @@ stages:
       name: gate_lr
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999]
-        training.lr_scheduler_kwargs.min_lr_rate: [0.25, 0.1]
-        training.warmup_ratio: [0.1, 0.25]
-        training.weight_decay: [0.001, 0.01]
+        layerwise_lr.groups["up"].layers.start: [0, 10]
 
   - name: stage1
     env_variables:

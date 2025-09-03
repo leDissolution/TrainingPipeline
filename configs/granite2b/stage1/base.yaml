@@ -49,6 +49,7 @@ layerwise_lr:
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
       lr_scale: 0.01
+      force_require_grad: true
 
 training:
   output_dir: "${WORK_BASE}/g2b-stage1"
