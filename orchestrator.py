@@ -866,7 +866,6 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
                         allow_patterns=allow_patterns,
                         ignore_patterns=ignore_patterns,
                         token=token_val,
-                        local_dir_use_symlinks=False,
                         max_workers=8,
                     )
                 except Exception as e:
