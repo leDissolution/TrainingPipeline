@@ -60,7 +60,7 @@ training:
   warmup_ratio: 0.2
   lr_scheduler_type: cosine_with_min_lr
   lr_scheduler_kwargs:
-    min_lr_rate: 0.33
+    min_lr_rate: 0.2
   weight_decay: 0.01
   adam_beta1: 0.9
   adam_beta2: 0.99
@@ -77,13 +77,13 @@ training:
 loss:
   use_fork_weighed: true
   fork_mask_key: fork_mask
-  fork_alpha: 0.5
+  fork_alpha: 1.0
   fork_alpha_schedule:
-    type: linear | cosine | constant
+    type: cosine
     args:
       start_rate: 0 # ratio of alpha
       end_rate: 1.0
-      start_step: 0.1 # ratio of total steps
+      start_step: 0.2 # ratio of total steps
       end_step: 0.8
   mask_generator:
     type: after_special_token

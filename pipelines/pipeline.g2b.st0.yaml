@@ -48,8 +48,7 @@ stages:
       name: gate_lr
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999]
-        training.dataset_seed: [42, 3407, 9999]
-        loss.fork_alpha: [0.5, 1.0]
+        training.effective_batch_size: [6, 8, 12]
 
   - name: stage1
     env_variables:
