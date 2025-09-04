@@ -21,7 +21,7 @@ model:
 
 peft:
   r: 100
-  lora_alpha: 100
+  lora_alpha: rank
   lora_dropout: 0.0
   modules_to_save:
     - embed_tokens
