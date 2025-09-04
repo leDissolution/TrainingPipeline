@@ -54,7 +54,7 @@ stages:
       name: gate_lr
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000]
-        peft.rank: [80]
+        peft.rank: [60]
 
   - name: stage1
     env_variables:
