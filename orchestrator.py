@@ -18,13 +18,14 @@ import re
 @dataclass
 class Stage:
     name: str
-    kind: str  # 'script' | 'make_sweeps' | 'select_best'
+    kind: str  # 'script' | 'make_sweeps' | 'select_best' | 'pull_from_hf'
     script: Optional[str]
     venv: Optional[str]
     args: Dict[str, Any]
     env: Dict[str, str]
     sweeps: Optional[Dict[str, Any]]
     select: Optional[Dict[str, Any]]
+    pull: Optional[Dict[str, Any]]
 
 
 def _is_windows() -> bool:
@@ -232,6 +233,7 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                     env=env_vars,
                     sweeps=sweeps_cfg,
                     select=None,
+                    pull=None,
                 )
             )
             continue
@@ -248,6 +250,25 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                     env=env_vars,
                     sweeps=None,
                     select=sel_cfg,
+                    pull=None,
+                )
+            )
+            continue
+
+        # pull_from_hf stage
+        if "pull_from_hf" in st and st.get("pull_from_hf") is not None:
+            pull_cfg = st.get("pull_from_hf") or {}
+            stages.append(
+                Stage(
+                    name=name,
+                    kind="pull_from_hf",
+                    script=None,
+                    venv=None,
+                    args={},
+                    env=env_vars,
+                    sweeps=None,
+                    select=None,
+                    pull=pull_cfg,
                 )
             )
             continue
@@ -270,6 +291,7 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                 env=env_vars,
                     sweeps=None,
                     select=None,
+                    pull=None,
             )
         )
     return repo_root, stages
@@ -639,7 +661,7 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
     for s_idx, st in enumerate(selected):
         print(f"\n[orchestrator] === Stage {s_idx+1}/{len(selected)}: {st.name} ===")
 
-        # Handle make_sweeps stages
+    # Handle make_sweeps stages
         if st.kind == "make_sweeps":
             # Logs directory for stage
             stage_log_dir = os.path.join(base_log_dir, f"{s_idx+1:02d}_{st.name}")
@@ -662,7 +684,7 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
             # proceed to next stage
             continue
 
-        # Handle select_best stages
+    # Handle select_best stages
         if st.kind == "select_best":
             stage_log_dir = os.path.join(base_log_dir, f"{s_idx+1:02d}_{st.name}")
             _ensure_dir(stage_log_dir)
@@ -780,6 +802,93 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
                         lf.write(f"  {v:0.6f}\t{p}\n")
             except Exception as e:
                 print(f"[orchestrator] select_best failed: {e}")
+                overall_rc = 1
+                if stop_on_fail:
+                    return overall_rc
+            continue
+
+        # Handle pull_from_hf stages
+        if st.kind == "pull_from_hf":
+            stage_log_dir = os.path.join(base_log_dir, f"{s_idx+1:02d}_{st.name}")
+            _ensure_dir(stage_log_dir)
+            try:
+                pull_cfg = _deep_interpolate(st.pull or {}, scope_vars)
+                model_id = str(pull_cfg.get("model_id", "")).strip()
+                output_dir_raw = str(pull_cfg.get("output_dir", "")).strip()
+                var_name = str(pull_cfg.get("var_name", "PULLED_MODEL_PATH")).strip()
+                token_env = str(pull_cfg.get("token_env", "HUGGINGFACE_TOKEN")).strip()
+                revision = pull_cfg.get("revision")
+                allow_patterns = pull_cfg.get("allow_patterns")
+                ignore_patterns = pull_cfg.get("ignore_patterns")
+                if not model_id:
+                    raise ValueError("pull_from_hf.model_id is required")
+                if not output_dir_raw:
+                    raise ValueError("pull_from_hf.output_dir is required")
+                output_dir = _normpath(repo_root, output_dir_raw)
+                _ensure_dir(output_dir)
+
+                # Resolve token from environment
+                token_val = os.environ.get(token_env) or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN") or os.environ.get("HF_HUB_TOKEN")
+                if not token_val:
+                    print(f"[orchestrator] Warning: No Hugging Face token found in env var '{token_env}' (or HF_TOKEN/HF_HUB_TOKEN). Proceeding unauthenticated.")
+
+                # Perform download (skip in dry-run)
+                summary_path = os.path.join(stage_log_dir, "stage.log")
+                if dry_run:
+                    with open(summary_path, "w", encoding="utf-8") as lf:
+                        lf.write(f"Would pull '{model_id}' -> '{output_dir}' (revision={revision}) using token env '{token_env}'.\n")
+                    # still set var to intended output
+                    scope_vars[var_name] = output_dir
+                    if isinstance(pipeline_vars, dict):
+                        pipeline_vars[var_name] = output_dir
+                    continue
+
+                # Import here to avoid mandatory dep if feature unused
+                try:
+                    from huggingface_hub import snapshot_download, login
+                except Exception as e:
+                    print(f"[orchestrator] Error: huggingface_hub not installed: {e}")
+                    return 1 if stop_on_fail else 0
+
+                # Authenticate if token provided
+                if token_val:
+                    try:
+                        login(token=token_val, write_permission=False, add_to_git_credential=False)
+                    except Exception as e:
+                        print(f"[orchestrator] Warning: login failed, will try direct token use: {e}")
+
+                try:
+                    # Download snapshot
+                    snapshot_download(
+                        repo_id=model_id,
+                        local_dir=output_dir,
+                        revision=revision,
+                        allow_patterns=allow_patterns,
+                        ignore_patterns=ignore_patterns,
+                        token=token_val,
+                        local_dir_use_symlinks=False,
+                        max_workers=8,
+                    )
+                except Exception as e:
+                    print(f"[orchestrator] pull_from_hf failed: {e}")
+                    overall_rc = 1
+                    if stop_on_fail:
+                        return overall_rc
+                else:
+                    # Persist selection into scope for later stages
+                    scope_vars[var_name] = output_dir
+                    try:
+                        if isinstance(pipeline_vars, dict):
+                            pipeline_vars[var_name] = output_dir
+                    except Exception:
+                        pass
+                    with open(summary_path, "w", encoding="utf-8") as lf:
+                        lf.write(f"Pulled {model_id} -> {output_dir}\n")
+                        if revision:
+                            lf.write(f"revision: {revision}\n")
+                        lf.write(f"set ${var_name}={output_dir}\n")
+            except Exception as e:
+                print(f"[orchestrator] pull_from_hf failed: {e}")
                 overall_rc = 1
                 if stop_on_fail:
                     return overall_rc
