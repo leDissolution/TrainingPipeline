@@ -54,8 +54,7 @@ stages:
       name: gate_lr
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000]
-        loss.fork_alpha_schedule.args.start_rate: [1.0]
-        loss.fork_alpha_schedule.args.end_rate: [0.0]
+        training.adam_beta2: [0.999, 0.95]
 
   - name: stage1
     env_variables:
