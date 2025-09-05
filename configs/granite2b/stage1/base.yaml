@@ -58,7 +58,7 @@ training:
   effective_batch_size: 14
   gradient_accumulation_steps: 1
   warmup_ratio: 0.2
-  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_type: constant
   lr_scheduler_kwargs:
     min_lr_rate: 0.2
   weight_decay: 0.01
