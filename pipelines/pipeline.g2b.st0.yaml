@@ -54,7 +54,8 @@ stages:
       name: gate_lr
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000]
-        trainer.lr_scheduler_type: ["constant"]
+        loss.fork_alpha_schedule.args.start_rate: [1.0]
+        loss.fork_alpha_schedule.args.end_rate: [0.0]
 
   - name: stage1
     env_variables:
