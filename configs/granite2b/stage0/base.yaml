@@ -61,8 +61,8 @@ layerwise_lr:
       lr_scale: 0.66
       force_enable: false
       force_require_grad: true
-    - name: up
-      suffixes: ["mlp.up_proj"]
+    - name: mlp
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
       layers: { start: 0, end: 40 }
       lr_scale: 0.33
       force_enable: true
@@ -72,11 +72,6 @@ layerwise_lr:
       lr_scale: 0.33
       force_enable: false
       force_require_grad: true
-    - name: gate
-      suffixes: ["mlp.gate_proj"]
-      layers: { start: 0, end: 30 }
-      lr_scale: 1.0
-      force_enable: true
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
       lr_scale: 0.35
