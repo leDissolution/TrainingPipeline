@@ -50,14 +50,14 @@ layerwise_lr:
   base_lr: 3.0e-5
   groups:
     - name: up_gate_special
-      suffixes: ["mlp.gate_proj", "mlp.up_proj"]
-      layers: [0, 13, 39]
+      suffixes: ["mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"]
+      layers: [0]
       lr_scale: 1
       weight_rescale: 0.5
       force_enable: true
     - name: layernorms_special
-      suffixes: ["input_layernorm"]
-      layers: [0, 13, 39]
+      suffixes: ["input_layernorm", "post_attention_layernorm"]
+      layers: [0]
       lr_scale: 0.66
       force_enable: false
       force_require_grad: true
