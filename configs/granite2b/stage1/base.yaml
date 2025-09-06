@@ -20,7 +20,7 @@ model:
   model_name: "${STAGE0_BEST}"
 
 peft:
-  r: 100
+  r: 64
   lora_alpha: rank
   lora_dropout: 0.0
   modules_to_save:

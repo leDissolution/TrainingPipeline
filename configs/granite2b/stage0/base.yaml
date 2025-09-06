@@ -30,7 +30,7 @@ tokens:
     apply_to: ["input", "output"]
 
 peft:
-  r: 128
+  r: 64
   lora_alpha: rank
   lora_dropout: 0.0
   modules_to_save: ["embed_tokens", "lm_head"]
@@ -51,13 +51,13 @@ layerwise_lr:
   groups:
     - name: up_gate_special
       suffixes: ["mlp.gate_proj", "mlp.up_proj"]
-      layers: [0, 13]
+      layers: [0, 13, 39]
       lr_scale: 1
       weight_rescale: 0.5
       force_enable: true
     - name: layernorms_special
       suffixes: ["input_layernorm"]
-      layers: [0, 13]
+      layers: [0, 13, 39]
       lr_scale: 0.66
       force_enable: false
       force_require_grad: true
@@ -95,7 +95,7 @@ training:
   lr_scheduler_kwargs: { min_lr_rate: 0.33 }
   weight_decay: 0.001
   adam_beta1: 0.9
-  adam_beta2: 0.999
+  adam_beta2: 0.99
   num_train_epochs: 1
   max_grad_norm: 1.0
   logging_steps: 1
