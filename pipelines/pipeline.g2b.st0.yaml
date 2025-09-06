@@ -16,55 +16,56 @@ stages:
         --with_synthetic: true
         --clean: true
 
-  # - name: stage0_make_sweeps
-  #   make_sweeps:
-  #     base_config: configs/granite2b/stage0/base.yaml
-  #     name: lr_boost_rank
-  #     param_ranges:
-  #       training.seed: [42, 1234, 3407, 5678, 9999]
-
-  # - name: stage0
-  #   env_variables:
-  #     - name: CUDA_VISIBLE_DEVICES
-  #       value: 0
-  #   script:
-  #     name: train.py
-  #     args:
-  #       --config: #configs/granite2b/stage0/base.yaml
-  #         sweep: configs/granite2b/stage0/lr_boost_rank
-
-  # - name: pick_best_stage0
-  #   select_best:
-  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-  #     metric: exact_match
-  #     prefer: max
-  #     file: last_eval_metrics.json
-  #     var_name: STAGE0_BEST
-  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-
-  - name: pull_stage0_from_hf
-    pull_from_hf:
-      model_id: LeDissolution/statsuite_stage0
-      output_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-      var_name: STAGE0_BEST
-
-  - name: stage1_make_sweeps
+  - name: stage0_make_sweeps
     make_sweeps:
-      base_config: configs/granite2b/stage1/base.yaml
-      name: gate_lr
+      base_config: configs/granite2b/stage0/base.yaml
+      name: lr_boost_rank
       param_ranges:
-        peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
-        peft.r: [16]
+        training.seed: [42, 1234, 3407, 5678, 9999, 10000]
+        peft.r: [16, 32, 64, 100]  
 
-  - name: stage1
+  - name: stage0
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
         value: 0
     script:
       name: train.py
       args:
-        --config:
-          sweep: ${CONFIG_BASE}/granite2b/stage1/gate_lr
+        --config: #configs/granite2b/stage0/base.yaml
+          sweep: configs/granite2b/stage0/lr_boost_rank
+
+  - name: pick_best_stage0
+    select_best:
+      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+      metric: exact_match
+      prefer: max
+      file: last_eval_metrics.json
+      var_name: STAGE0_BEST
+      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+
+  # - name: pull_stage0_from_hf
+  #   pull_from_hf:
+  #     model_id: LeDissolution/statsuite_stage0
+  #     output_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+  #     var_name: STAGE0_BEST
+
+  # - name: stage1_make_sweeps
+  #   make_sweeps:
+  #     base_config: configs/granite2b/stage1/base.yaml
+  #     name: gate_lr
+  #     param_ranges:
+  #       peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
+  #       peft.r: [16]
+
+  # - name: stage1
+  #   env_variables:
+  #     - name: CUDA_VISIBLE_DEVICES
+  #       value: 0
+  #   script:
+  #     name: train.py
+  #     args:
+  #       --config:
+  #         sweep: ${CONFIG_BASE}/granite2b/stage1/gate_lr
 
   # - name: stage2
   #   env_variables:
