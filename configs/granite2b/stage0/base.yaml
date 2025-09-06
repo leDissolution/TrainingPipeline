@@ -82,12 +82,13 @@ training:
   seed: 42
   dataset_seed: 1234
   output_dir: "${WORK_BASE}/g2b-stage0"
-  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
+  #merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
+  merge_output_dir: null
   effective_batch_size: 6
   gradient_accumulation_steps: 1
   warmup_ratio: 0.1
   lr_scheduler_type: constant
-  lr_scheduler_kwargs: { min_lr_rate: 0.33 }
+  lr_scheduler_kwargs: { min_lr_rate: 0.25 }
   weight_decay: 0.001
   adam_beta1: 0.9
   adam_beta2: 0.99
