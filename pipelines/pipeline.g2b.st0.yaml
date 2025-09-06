@@ -53,8 +53,7 @@ stages:
       base_config: configs/granite2b/stage1/base.yaml
       name: gate_lr
       param_ranges:
-        training.seed: [42, 1234, 3407, 5678, 9999, 10000]
-        training.adam_beta2: [0.999, 0.95]
+        peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
 
   - name: stage1
     env_variables:
