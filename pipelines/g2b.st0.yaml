@@ -22,8 +22,8 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [9999, 10000, 12321, 20242]
-        training.lr_scheduler_type: ["constant_with_warmup", "linear", "cosine"]
-        training.warmup_ratio: [0.1]
+        training.lr_scheduler_type: ["cosine_with_min_lr"]
+        training.lr_scheduler_kwargs.min_lr_rate: [0.25, 0.5, 0.75]
 
   - name: stage0
     env_variables:
