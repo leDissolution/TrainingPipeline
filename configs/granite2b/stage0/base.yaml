@@ -63,13 +63,24 @@ layerwise_lr:
       force_require_grad: true
     - name: mlp
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
-      layers: { start: 0, end: 40 }
+      layers: { start: 0, end: 35 }
       lr_scale: 0.33
       force_enable: true
     - name: layernorms
       suffixes: ["input_layernorm"]
-      layers: { start: 0, end: 40 }
+      layers: { start: 0, end: 35 }
       lr_scale: 0.16
+      force_enable: false
+      force_require_grad: true
+    - name: mlp_tail
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: { start: 5, end: 40 }
+      lr_scale: 0.16
+      force_enable: true
+    - name: layernorms_tail
+      suffixes: ["input_layernorm"]
+      layers: { start: 5, end: 40 }
+      lr_scale: 0.08
       force_enable: false
       force_require_grad: true
     - name: embed
@@ -94,7 +105,7 @@ training:
   adam_beta1: 0.9
   adam_beta2: 0.99
   num_train_epochs: 1
-  max_grad_norm: 1.0
+  max_grad_norm: 2.0
   logging_steps: 1
   save_strategy: epoch
   save_only_model: true
