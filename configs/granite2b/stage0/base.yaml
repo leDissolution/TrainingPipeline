@@ -66,10 +66,10 @@ layerwise_lr:
       layers: { start: 0, end: 40 }
       lr_scale: 0.33
       force_enable: true
-    - name: input_layernorm
-      suffixes: ["input_layernorm"]
+    - name: layernorms
+      suffixes: ["input_layernorm", "post_attention_layernorm"]
       layers: { start: 0, end: 40 }
-      lr_scale: 0.33
+      lr_scale: 0.16
       force_enable: false
       force_require_grad: true
     - name: embed
@@ -86,8 +86,10 @@ training:
   merge_output_dir: null
   effective_batch_size: 6
   gradient_accumulation_steps: 1
-  warmup_ratio: 0.1
-  lr_scheduler_type: constant
+  warmup_ratio: 0.15
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.66
   weight_decay: 0.001
   adam_beta1: 0.9
   adam_beta2: 0.99
