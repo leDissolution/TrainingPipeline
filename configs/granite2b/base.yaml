@@ -38,9 +38,9 @@ training:
     on_uneven_split: warn_then_floor
     minimum_per_device: 1
   warmup_ratio: 0.25
-  lr_scheduler_type: cosine_with_min_lr
-  lr_scheduler_kwargs:
-    min_lr_rate: 0.33
+  # lr_scheduler_type: cosine_with_min_lr
+  # lr_scheduler_kwargs:
+  #   min_lr_rate: 0.33
   weight_decay: 0.01
   optim: adamw_8bit
   adam_beta1: 0.9
