@@ -61,26 +61,26 @@ layerwise_lr:
       lr_scale: 0.66
       force_enable: false
       force_require_grad: true
+    - name: mlp_tail
+      suffixes: ["mlp.up_proj", "mlp.gate_proj"]
+      layers: { start: 35, end: 40 }
+      lr_scale: 0.11
+      force_enable: true
+    - name: layernorms_tail
+      suffixes: ["input_layernorm"]
+      layers: { start: 35, end: 40 }
+      lr_scale: 0.08
+      force_enable: false
+      force_require_grad: true
     - name: mlp
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
-      layers: { start: 0, end: 35 }
+      layers: { start: 0, end: 40 }
       lr_scale: 0.33
       force_enable: true
     - name: layernorms
       suffixes: ["input_layernorm"]
-      layers: { start: 0, end: 35 }
+      layers: { start: 0, end: 40 }
       lr_scale: 0.16
-      force_enable: false
-      force_require_grad: true
-    - name: mlp_tail
-      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
-      layers: { start: 5, end: 40 }
-      lr_scale: 0.16
-      force_enable: true
-    - name: layernorms_tail
-      suffixes: ["input_layernorm"]
-      layers: { start: 5, end: 40 }
-      lr_scale: 0.08
       force_enable: false
       force_require_grad: true
     - name: embed
