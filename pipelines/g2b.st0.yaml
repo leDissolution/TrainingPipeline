@@ -21,7 +21,7 @@ stages:
       base_config: configs/granite2b/stage0/base.yaml
       name: lr_boost_rank
       param_ranges:
-        training.seed: [9999, 10000, 12321, 20242]
+        training.seed: [42, 1234, 3407, 5678]
         training.lr_scheduler_type: ["cosine_with_min_lr"]
         training.lr_scheduler_kwargs.min_lr_rate: [0.25, 0.5, 0.75]
 
