@@ -56,7 +56,7 @@ layerwise_lr:
       weight_rescale: 0.5
       force_enable: true
     - name: layernorms_special
-      suffixes: ["input_layernorm", "post_attention_layernorm"]
+      suffixes: ["input_layernorm"]
       layers: [0]
       lr_scale: 0.66
       force_enable: false
@@ -67,7 +67,7 @@ layerwise_lr:
       lr_scale: 0.33
       force_enable: true
     - name: layernorms
-      suffixes: ["input_layernorm", "post_attention_layernorm"]
+      suffixes: ["input_layernorm"]
       layers: { start: 0, end: 40 }
       lr_scale: 0.16
       force_enable: false
