@@ -105,7 +105,7 @@ training:
   adam_beta1: 0.9
   adam_beta2: 0.99
   num_train_epochs: 1
-  max_grad_norm: 2.0
+  max_grad_norm: 1.0
   logging_steps: 1
   save_strategy: epoch
   save_only_model: true

@@ -22,7 +22,7 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        layerwise_lr.groups["layernorms"].lr_scale: [0.16]
+        training.max_grad_norm: [0.5]
         training.run_name: ["tail_mlp"]
 
   - name: stage0
