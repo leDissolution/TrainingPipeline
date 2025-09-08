@@ -346,7 +346,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         if proc_idx != 0:
             return None
         if self._pe_log_path is None:
-            out_dir = str(getattr(self.args, "output_dir", "./outputs") or "./outputs")
+            out_dir = str(getattr(self.args, "logging_dir", "./outputs") or "./outputs")
             base = os.path.join(out_dir, "per_example_train")
             try:
                 os.makedirs(base, exist_ok=True)
