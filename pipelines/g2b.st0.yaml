@@ -22,9 +22,7 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.effective_batch_size: [7]
-        #training.seed: [10000]
-        training.run_name: ["with_log"]
+        training.run_name: ["new_dataset"]
 
   - name: stage0
     env_variables:
