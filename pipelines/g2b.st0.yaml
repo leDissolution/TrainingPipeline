@@ -23,13 +23,18 @@ stages:
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
         layerwise_lr.groups["up"].lr_scale: [0.5]
-        layerwise_lr.groups["embed"].lr_scale: [0.11]
-        training.run_name: ["up_gate_1x"]
+        training.run_name: ["with_log"]
 
   - name: stage0
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
         value: 0
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
     script:
       name: train.py
       args:

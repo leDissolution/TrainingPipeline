@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Iterable, List, Sequence, Tuple, Dict, Any, Optional, cast, Sized
 from dataclasses import dataclass
 import os
+import json
 
 import torch
 from trl import SFTTrainer
@@ -317,6 +318,121 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         self._fork_alpha = float(fork_alpha)
         self._fork_mask_key = str(fork_mask_key)
         self._ignore_index = int(ignore_index)
+        # Per-example logging controls (opt-in via env vars)
+        self._pe_log_topk: int = 0
+        self._pe_log_text: bool = False
+        self._pe_log_min_loss: float = 0.0
+
+        try:
+            self._pe_log_topk = int(os.environ.get("PER_EX_TRAIN_LOG_TOPK", "0"))
+        except Exception:
+            self._pe_log_topk = 0
+        val = os.environ.get("PER_EX_TRAIN_LOG_TEXT", "0").strip().lower()
+        self._pe_log_text = val in ("1", "true", "yes", "y")
+        try:
+            self._pe_log_min_loss = float(os.environ.get("PER_EX_TRAIN_LOG_MIN_LOSS", "0"))
+        except Exception:
+            self._pe_log_min_loss = 0.0
+        self._pe_log_dir: Optional[str] = None
+        self._pe_log_path: Optional[str] = None
+        # scratch holder for last batch details in case callbacks want it
+        self._last_batch_per_example: Optional[Dict[str, Any]] = None
+
+    def _ensure_pe_log_path(self) -> Optional[str]:
+        if self._pe_log_topk <= 0:
+            return None
+        # Only main process writes
+        proc_idx = int(getattr(self.args, "process_index", 0) or 0)
+        if proc_idx != 0:
+            return None
+        if self._pe_log_path is None:
+            out_dir = str(getattr(self.args, "output_dir", "./outputs") or "./outputs")
+            base = os.path.join(out_dir, "per_example_train")
+            try:
+                os.makedirs(base, exist_ok=True)
+            except Exception:
+                return None
+            self._pe_log_dir = base
+            self._pe_log_path = os.path.join(base, "stream.jsonl")
+        return self._pe_log_path
+
+    @torch.no_grad()
+    def _collect_per_example_from_batch(
+        self,
+        inputs: Dict[str, Any],
+        shift_logits: torch.Tensor,  # (B, S-1, V)
+        shift_labels: torch.Tensor,  # (B, S-1)
+        fork_mask: Optional[torch.Tensor],
+    ) -> Dict[str, Any]:
+        # Per-token loss
+        vocab = shift_logits.size(-1)
+        per_token = F.cross_entropy(
+            shift_logits.float().view(-1, vocab),
+            shift_labels.view(-1),
+            ignore_index=self._ignore_index,
+            reduction="none",
+        ).view_as(shift_labels).float()
+
+        # Fork weighting (same as in loss), default alpha on non-fork tokens
+        if fork_mask is None:
+            shift_mask = torch.zeros_like(shift_labels, dtype=torch.bool)
+        else:
+            shift_mask = fork_mask[..., 1:].contiguous().bool()
+        token_w = torch.where(shift_mask, torch.ones_like(per_token), torch.full_like(per_token, self._fork_alpha))
+
+        valid = (shift_labels != self._ignore_index)
+        token_w = token_w * valid
+
+        per_ex_sum = (per_token * token_w).sum(dim=1, dtype=torch.float32)
+        per_ex_cnt = valid.sum(dim=1, dtype=torch.float32).clamp_min(1)
+        per_ex_loss = (per_ex_sum / per_ex_cnt).detach().cpu()
+
+        # Try to find example identifiers carried in the batch
+        id_keys = ("id", "ids", "example_id", "example_ids", "idx", "index")
+        ex_ids: Optional[List[Any]] = None
+        for k in id_keys:
+            if k in inputs:
+                try:
+                    v = inputs[k]
+                    if isinstance(v, (list, tuple)):
+                        ex_ids = list(v)
+                    elif torch.is_tensor(v):
+                        ex_ids = v.detach().cpu().tolist()
+                    else:
+                        # don't know; skip
+                        pass
+                except Exception:
+                    pass
+                if ex_ids is not None:
+                    break
+
+        # Optional decoded snippets to help locate offending cases
+        snippets: Optional[List[str]] = None
+        if self._pe_log_text and "input_ids" in inputs:
+            try:
+                input_ids = inputs["input_ids"]
+                if torch.is_tensor(input_ids):
+                    # Extract only completion span based on labels mask
+                    mask = (shift_labels != self._ignore_index)
+                    # Align to input_ids without the last token (because of shift)
+                    ii = input_ids[:, :-1]
+                    seqs = [ii[b][mask[b]].tolist() if mask[b].any() else ii[b].tolist() for b in range(ii.size(0))]
+                    tok = getattr(self, "tokenizer", None)
+                    if tok is not None and hasattr(tok, "decode"):
+                        snippets = [tok.decode(s, skip_special_tokens=True, clean_up_tokenization_spaces=True)[:256] for s in seqs]
+                    else:
+                        snippets = None
+                else:
+                    snippets = None
+            except Exception:
+                snippets = None
+
+        return {
+            "loss": per_ex_loss.tolist(),
+            "count": per_ex_cnt.detach().cpu().tolist(),
+            "ids": ex_ids,
+            "snippets": snippets,
+        }
 
     def compute_loss(  # type: ignore[override]
         self,
@@ -337,6 +453,71 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
 
         logits = outputs["logits"] if isinstance(outputs, dict) else outputs.logits
         loss = self._fork_weighted_shifted_loss(logits, labels, fork_mask, logit_divider=logit_scale)
+
+        # Per-example logging (opt-in)
+        if self._pe_log_topk > 0:
+            try:
+                if logit_scale != 0:
+                    logits_for_log = logits / logit_scale
+                else:
+                    logits_for_log = logits
+                shift_logits = logits_for_log[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                details = self._collect_per_example_from_batch(inputs, shift_logits, shift_labels, fork_mask)
+
+                # Rank by loss and take top-k exceeding threshold
+                losses = details.get("loss", [])
+                if isinstance(losses, list) and losses:
+                    try:
+                        import numpy as _np  # optional
+                        arr = _np.asarray(losses, dtype=float)
+                        k = max(1, min(self._pe_log_topk, arr.size))
+                        idxs = _np.argpartition(-arr, k - 1)[:k]
+                        worst = sorted([(int(i), float(arr[i])) for i in idxs if float(arr[i]) >= self._pe_log_min_loss], key=lambda x: -x[1])
+                    except Exception:
+                        # Fallback: pure Python partial sort
+                        pairs = [(i, float(l)) for i, l in enumerate(losses) if float(l) >= self._pe_log_min_loss]
+                        pairs.sort(key=lambda x: -x[1])
+                        worst = pairs[: max(1, min(self._pe_log_topk, len(pairs)))]
+                    if worst:
+                        path = self._ensure_pe_log_path()
+                        payloads = []
+                        step = int(getattr(self.state, "global_step", 0)) if hasattr(self, "state") else None
+                        for i, l in worst:
+                            item = {
+                                "step": step,
+                                "rank": int(i),
+                                "loss": float(l),
+                                "tok_count": (details.get("count") or [None])[i] if i < len(details.get("count") or []) else None,
+                                "id": (details.get("ids") or [None])[i] if details.get("ids") is not None and i < len(details.get("ids") or []) else None,
+                            }
+                            if self._pe_log_text:
+                                snips = details.get("snippets") or []
+                                item["snippet"] = (snips[i] if i < len(snips) else None)
+                            payloads.append(item)
+
+                        # also stash for callbacks / interactive inspection
+                        self._last_batch_per_example = {
+                            "step": step,
+                            "topk": payloads,
+                        }
+
+                        if path is not None:
+                            try:
+                                with open(path, "a", encoding="utf-8") as f:
+                                    for p in payloads:
+                                        f.write(json.dumps(p, ensure_ascii=False) + "\n")
+                            except Exception:
+                                pass
+                        else:
+                            # Fallback: print succinctly
+                            try:
+                                print("[per-ex] step=", step, "worst=", payloads)
+                            except Exception:
+                                pass
+            except Exception:
+                # Never break training on logging errors
+                self._last_batch_per_example = None
         return (loss, outputs) if return_outputs else loss
 
     def _fork_weighted_shifted_loss(
