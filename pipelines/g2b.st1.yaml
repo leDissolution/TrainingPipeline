@@ -40,11 +40,11 @@ stages:
         --config:
           sweep: ${CONFIG_BASE}/granite2b/stage1/gate_lr
 
-  - name: stage2
-    env_variables:
-      - name: CUDA_VISIBLE_DEVICES
-        value: 1
-    script:
-      name: train.py
-      args:
-        --config: ${CONFIG_BASE}/granite2b/stage2/base.yaml
+  # - name: stage2
+  #   env_variables:
+  #     - name: CUDA_VISIBLE_DEVICES
+  #       value: 1
+  #   script:
+  #     name: train.py
+  #     args:
+  #       --config: ${CONFIG_BASE}/granite2b/stage2/base.yaml
