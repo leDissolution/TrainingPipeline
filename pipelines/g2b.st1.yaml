@@ -28,7 +28,7 @@ stages:
       name: gate_lr
       param_ranges:
         peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
-        peft.r: [16]
+        training.run_name: ["baseline"]
 
   - name: stage1
     env_variables:
