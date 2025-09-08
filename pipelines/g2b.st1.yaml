@@ -28,12 +28,19 @@ stages:
       name: gate_lr
       param_ranges:
         peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
-        training.run_name: ["baseline"]
+        training.max_grad_norm_schedule: ["linear"]
+        training.max_grad_norm_schedule.args.start_value: [0.01, 0.1]
 
   - name: stage1
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
         value: 0
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
     script:
       name: train.py
       args:

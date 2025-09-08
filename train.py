@@ -858,6 +858,36 @@ def main() -> None:
     except Exception:
         pass
 
+    # Optional: max_grad_norm scheduler + TB logging
+    try:
+        train_cfg = cfg.get("training", {}) or {}
+        mg_sched = train_cfg.get("max_grad_norm_schedule", None)
+        if mg_sched:
+            from callbacks import MaxGradNormScheduler
+            mg_type = str(mg_sched.get("type", "constant").split("|")[0]).strip() if isinstance(mg_sched.get("type"), str) else str(mg_sched.get("type", "constant"))
+            if mg_type in ("linear", "cosine", "constant"):
+                base_mg = float(train_cfg.get("max_grad_norm", 1.0))
+                def _set_mg(v: float) -> None:
+                    try:
+                        setattr(trainer.args, "max_grad_norm", float(v))
+                    except Exception:
+                        pass
+                mg_cb = MaxGradNormScheduler(
+                    base_value=base_mg,
+                    sched_type=mg_type,
+                    args=(mg_sched.get("args", None) or {}),
+                    on_update=_set_mg,
+                    logging_dir=logging_dir,
+                    use_trainer_logging_dir=True,
+                    filename_suffix=".grad_clip",
+                )
+                try:
+                    trainer.add_callback(mg_cb)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     #trainer.add_callback(LogSamplerOrder(trainer))
 
     trainer.train(resume_from_checkpoint=False)

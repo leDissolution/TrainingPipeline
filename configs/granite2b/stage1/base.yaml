@@ -54,7 +54,6 @@ training:
   adam_beta1: 0.9
   adam_beta2: 0.99
   max_steps: 1200
-  max_grad_norm: 1.0
   logging_steps: 1
   save_strategy: steps
   save_steps: 1200
@@ -62,6 +61,15 @@ training:
   eval_strategy: steps
   eval_steps: 50
   eval_on_start: true
+
+  max_grad_norm: 1.0
+  max_grad_norm_schedule:
+    type: linear
+    args:
+      start_value: 0.1
+      end_value: 1.0
+      start_step: 0.0
+      end_step: 0.2
 
 loss:
   use_fork_weighed: true
@@ -79,3 +87,6 @@ loss:
     args:
       tokens: ["=\"", ",", " (", ";"]
       include_special_tokens: true
+
+gradient_logging:
+  enabled: true
