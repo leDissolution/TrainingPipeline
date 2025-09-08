@@ -22,8 +22,8 @@ stages:
       name: lr_boost_rank
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.max_grad_norm: [1.5]
-        training.run_name: ["tail_mlp"]
+        layerwise_lr.groups["up"].lr_scale: [0.33, 0.66]
+        training.run_name: ["up_gate_1x"]
 
   - name: stage0
     env_variables:

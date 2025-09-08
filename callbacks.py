@@ -410,9 +410,7 @@ class GradTensorBoardLogger(TrainerCallback):
             Kind is determined from parameter name containing ".mlp." or ".self_attn.".
         - On logging steps (control.should_log), writes scalars to TB under tags like:
             grads/layer_{i}/self_attn/l2
-            grads/layer_{i}/self_attn/mean_abs
             grads/layer_{i}/mlp/l2
-            grads/layer_{i}/mlp/mean_abs
 
         Logging location behavior:
         - By default, this callback writes into the SAME TensorBoard run directory as the
@@ -545,33 +543,26 @@ class GradTensorBoardLogger(TrainerCallback):
         # Aggregate and write
         try:
             # Optional: global per-kind aggregator across layers
-            global_kind_acc: DefaultDict[str, Dict[str, float]] = defaultdict(lambda: {"sq_sum": 0.0, "abs_sum": 0.0, "count": 0.0})
+            global_kind_acc: DefaultDict[str, Dict[str, float]] = defaultdict(lambda: {"sq_sum": 0.0, "count": 0.0})
             for (layer_idx, kind), stats in list(self._acc.items()):
-                count = max(1.0, float(stats.get("count", 0.0)))
                 l2 = (float(stats.get("sq_sum", 0.0)) ** 0.5)
-                mean_abs = float(stats.get("abs_sum", 0.0)) / count
                 # Per-layer
                 base = f"{self.tag_prefix}/layer_{layer_idx}/{kind}"
                 try:
                     self._writer.add_scalar(f"{base}/l2", l2, step)
-                    self._writer.add_scalar(f"{base}/mean_abs", mean_abs, step)
                 except Exception:
                     pass
                 # Accumulate global per-kind
                 g = global_kind_acc[kind]
                 g["sq_sum"] += float(stats.get("sq_sum", 0.0))
-                g["abs_sum"] += float(stats.get("abs_sum", 0.0))
                 g["count"] += float(stats.get("count", 0.0))
 
             # Global per-kind
             for kind, g in global_kind_acc.items():
-                cnt = max(1.0, float(g.get("count", 0.0)))
                 l2 = (float(g.get("sq_sum", 0.0)) ** 0.5)
-                mean_abs = float(g.get("abs_sum", 0.0)) / cnt
                 base = f"{self.tag_prefix}/all_layers/{kind}"
                 try:
                     self._writer.add_scalar(f"{base}/l2", l2, step)
-                    self._writer.add_scalar(f"{base}/mean_abs", mean_abs, step)
                 except Exception:
                     pass
             try:
