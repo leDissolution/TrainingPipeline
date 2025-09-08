@@ -417,7 +417,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
                     # Align to input_ids without the last token (because of shift)
                     ii = input_ids[:, :-1]
                     seqs = [ii[b][mask[b]].tolist() if mask[b].any() else ii[b].tolist() for b in range(ii.size(0))]
-                    tok = getattr(self, "tokenizer", None)
+                    tok = getattr(self, "processing_class", None)
                     if tok is not None and hasattr(tok, "decode"):
                         snippets = [tok.decode(s, skip_special_tokens=True, clean_up_tokenization_spaces=True)[:256] for s in seqs]
                     else:
