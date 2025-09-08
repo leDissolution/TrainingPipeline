@@ -40,14 +40,14 @@ stages:
         --config: #configs/granite2b/stage0/base.yaml
           sweep: configs/granite2b/stage0/lr_boost_rank
 
-  # - name: pick_best_stage0
-  #   select_best:
-  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-  #     metric: exact_match
-  #     prefer: max
-  #     file: last_eval_metrics.json
-  #     var_name: STAGE0_BEST
-  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+  - name: pick_best_stage0
+    select_best:
+      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+      metric: exact_match
+      prefer: max
+      file: last_eval_metrics.json
+      var_name: STAGE0_BEST
+      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
 
   # - name: pull_stage0_from_hf
   #   pull_from_hf:
