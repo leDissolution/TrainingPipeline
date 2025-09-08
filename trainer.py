@@ -356,6 +356,32 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
             self._pe_log_path = os.path.join(base, "stream.jsonl")
         return self._pe_log_path
 
+    def _extract_example_ids_from_inputs(self, inputs: Dict[str, Any]) -> Optional[List[Any]]:
+        """Pop common id keys from inputs and return as a Python list if present.
+
+        This avoids passing unknown kwargs to the model forward while still
+        letting the collator/dataset pipe IDs into the batch.
+        """
+        id_keys = ("example_ids", "ids", "example_id", "id", "idx", "index")
+        for k in id_keys:
+            if k in inputs:
+                try:
+                    v = inputs.pop(k)
+                    if isinstance(v, (list, tuple)):
+                        return list(v)
+                    if torch.is_tensor(v):
+                        return v.detach().cpu().tolist()
+                    # Fallback to single value wrapped
+                    return [v]
+                except Exception:
+                    try:
+                        # If pop failed, ensure the key is removed to prevent model kwargs issues
+                        inputs.pop(k, None)
+                    except Exception:
+                        pass
+                    return None
+        return None
+
     @torch.no_grad()
     def _collect_per_example_from_batch(
         self,
@@ -363,6 +389,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         shift_logits: torch.Tensor,  # (B, S-1, V)
         shift_labels: torch.Tensor,  # (B, S-1)
         fork_mask: Optional[torch.Tensor],
+        ex_ids_override: Optional[List[Any]] = None,
     ) -> Dict[str, Any]:
         # Per-token loss
         vocab = shift_logits.size(-1)
@@ -388,23 +415,19 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         per_ex_loss = (per_ex_sum / per_ex_cnt).detach().cpu()
 
         # Try to find example identifiers carried in the batch
-        id_keys = ("id", "ids", "example_id", "example_ids", "idx", "index")
-        ex_ids: Optional[List[Any]] = None
-        for k in id_keys:
-            if k in inputs:
-                try:
-                    v = inputs[k]
-                    if isinstance(v, (list, tuple)):
-                        ex_ids = list(v)
-                    elif torch.is_tensor(v):
-                        ex_ids = v.detach().cpu().tolist()
-                    else:
-                        # don't know; skip
-                        pass
-                except Exception:
-                    pass
-                if ex_ids is not None:
-                    break
+        ex_ids: Optional[List[Any]] = ex_ids_override
+        if ex_ids is None:
+            # As a fallback, try to read without mutating inputs
+            try:
+                v = inputs.get("example_ids", None)
+                if v is None:
+                    v = inputs.get("ids", None)
+                if isinstance(v, (list, tuple)):
+                    ex_ids = list(v)
+                elif torch.is_tensor(v):
+                    ex_ids = v.detach().cpu().tolist()
+            except Exception:
+                ex_ids = None
 
         # Optional decoded snippets to help locate offending cases
         snippets: Optional[List[str]] = None
@@ -417,7 +440,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
                     # Align to input_ids without the last token (because of shift)
                     ii = input_ids[:, :-1]
                     seqs = [ii[b][mask[b]].tolist() if mask[b].any() else ii[b].tolist() for b in range(ii.size(0))]
-                    tok = getattr(self, "processing_class", None)
+                    tok = getattr(self, "processing_class", None) # tokenizer is obsolete, processing_class is the new name
                     if tok is not None and hasattr(tok, "decode"):
                         snippets = [tok.decode(s, skip_special_tokens=True, clean_up_tokenization_spaces=True)[:256] for s in seqs]
                     else:
@@ -442,6 +465,8 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         num_items_in_batch: Optional[int] = None,
     ):
         fork_mask = inputs.pop(self._fork_mask_key, None)
+        # Extract example IDs before passing inputs to model
+        batch_ex_ids = self._extract_example_ids_from_inputs(inputs)
 
         labels = inputs.get("labels", None)
         outputs = model(**inputs)
@@ -463,7 +488,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
                     logits_for_log = logits
                 shift_logits = logits_for_log[..., :-1, :].contiguous()
                 shift_labels = labels[..., 1:].contiguous()
-                details = self._collect_per_example_from_batch(inputs, shift_logits, shift_labels, fork_mask)
+                details = self._collect_per_example_from_batch(inputs, shift_logits, shift_labels, fork_mask, ex_ids_override=batch_ex_ids)
 
                 # Rank by loss and take top-k exceeding threshold
                 losses = details.get("loss", [])

@@ -430,6 +430,27 @@ def main() -> None:
     dataset = load_dataset("json", data_files=train_files, split="train")
     eval_dataset = load_dataset("json", data_files=eval_files, split="train")
 
+    # # Attach a stable example_id early so it can be threaded into batches
+    # try:
+    #     def _add_id(ex, idx):
+    #         val = None
+    #         try:
+    #             # Prefer explicit id if present
+    #             if isinstance(ex.data, dict) and "id" in ex.data and ex.data["id"] is not None:
+    #                 val = ex.data["id"]
+    #             elif isinstance(ex.data, dict) and "example_id" in ex.data and ex.data["example_id"] is not None:
+    #                 val = ex.data["example_id"]
+    #         except Exception:
+    #             val = None
+    #         if val is None:
+    #             val = idx
+    #         return {"example_id": val}
+
+    #     dataset = dataset.map(_add_id, with_indices=True)
+    #     eval_dataset = eval_dataset.map(_add_id, with_indices=True)
+    # except Exception:
+    #     pass
+
     # Collator
     coll_cfg = cfg.get("collator", {})
     completion_marker = str(coll_cfg.get("completion_start_marker", '="'))
@@ -487,7 +508,11 @@ def main() -> None:
             target_attrs = tmp
         # capture example ids for per-datapoint logging
         try:
-            eval_ids = [ex.get("id", None) if isinstance(ex, dict) else None for ex in eval_dataset]
+            eval_ids = [
+                (ex.get("example_id") if isinstance(ex, dict) and ex.get("example_id") is not None else ex.get("id", None))
+                if isinstance(ex, dict) else None
+                for ex in eval_dataset
+            ]
         except Exception:
             eval_ids = None
     except Exception:
@@ -622,6 +647,7 @@ def main() -> None:
     sft_args = SFTConfig(
         output_dir=output_dir,
         dataset_text_field=text_field,
+        remove_unused_columns=False,
         per_device_train_batch_size=per_device_train_bs,
         gradient_accumulation_steps=int(train_cfg.get("gradient_accumulation_steps", 1)),
         dataset_num_proc=int(train_cfg.get("dataset_num_proc", 1)),

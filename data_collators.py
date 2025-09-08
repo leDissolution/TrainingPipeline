@@ -50,7 +50,69 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
             self._mg_patterns = patterns
 
     def torch_call(self, examples: List[Any]) -> Dict[str, Any]:
-        batch = super().torch_call(examples)
+        # Extract per-example IDs up front from the raw examples
+        extracted_ids: List[Any] | None = None
+        try:
+            if isinstance(examples[0], dict):
+                id_keys = ["id", "example_id", "example_ids", "ids", "idx", "index"]
+                chosen = None
+                for k in id_keys:
+                    if any(isinstance(ex, dict) and (k in ex) for ex in examples):
+                        chosen = k
+                        break
+                if chosen is not None:
+                    def _to_py(v: Any) -> Any:
+                        try:
+                            import numpy as _np  # optional
+                            if isinstance(v, (_np.integer,)):
+                                return int(v)
+                            if isinstance(v, (_np.floating,)):
+                                return float(v)
+                            if isinstance(v, (_np.bool_,)):
+                                return bool(v)
+                        except Exception:
+                            pass
+                        if torch.is_tensor(v):
+                            try:
+                                return v.item() if v.numel() == 1 else v.detach().cpu().tolist()
+                            except Exception:
+                                return None
+                        if isinstance(v, (int, float, str, bool)) or v is None:
+                            return v
+                        try:
+                            return str(v)
+                        except Exception:
+                            return None
+
+                    tmp_ids: List[Any] = []
+                    for ex in examples:
+                        val = ex.get(chosen) if isinstance(ex, dict) else None
+                        if isinstance(val, (list, tuple)):
+                            val = val[0] if len(val) > 0 else None
+                        tmp_ids.append(_to_py(val))
+                    extracted_ids = tmp_ids
+        except Exception:
+            extracted_ids = None
+
+        # Sanitize examples: keep only tensorizable model keys before padding to avoid errors on text fields (e.g., 'prompt')
+        clean_examples = examples
+        try:
+            if isinstance(examples[0], dict):
+                allowed = {"input_ids", "labels", "attention_mask", "special_tokens_mask", "token_type_ids", "position_ids"}
+                clean_examples = []
+                for ex in examples:
+                    if not isinstance(ex, dict):
+                        clean_examples.append(ex)
+                        continue
+                    kept: Dict[str, Any] = {}
+                    for k, v in ex.items():
+                        if k in allowed:
+                            kept[k] = v
+                    clean_examples.append(kept)
+        except Exception:
+            clean_examples = examples
+
+        batch = super().torch_call(clean_examples)
         input_ids = batch["input_ids"]
         labels    = batch["labels"]
         attn_mask = batch["attention_mask"]
@@ -86,6 +148,28 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
                     break
 
         batch["labels"] = labels
+
+        # Pipe per-example IDs into the batch for downstream logging
+        try:
+            if extracted_ids is not None:
+                batch["example_ids"] = extracted_ids
+            else:
+                # Fallback: stable hash of input_ids per example
+                try:
+                    import hashlib
+                    ex_ids2: List[Any] = []
+                    for row in input_ids:
+                        try:
+                            arr = row.detach().cpu().numpy().tobytes()
+                        except Exception:
+                            arr = bytes(str(row.detach().cpu().tolist()), encoding="utf-8")
+                        h = hashlib.blake2b(arr, digest_size=8).hexdigest()
+                        ex_ids2.append(h)
+                    batch["example_ids"] = ex_ids2
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Optionally forward a per-token mask from dataset examples
         if self.fork_mask_key:

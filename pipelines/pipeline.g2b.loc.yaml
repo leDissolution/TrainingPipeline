@@ -21,12 +21,20 @@ stages:
       base_config: configs/granite2b/stage0/base.yaml
       name: lr_boost_rank
       param_ranges:
-        training.seed: [42]
+        #training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
+        training.seed: [10000]
+        training.run_name: ["with_log"]
 
   - name: stage0
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
-        value: 0
+        value: 1
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
     script:
       name: train.py
       args:
