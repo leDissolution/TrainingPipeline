@@ -597,8 +597,13 @@ class ForkAlphaScheduler(TrainerCallback):
     Config schema (YAML under loss.fork_alpha_schedule):
       type: "linear" | "cosine" | "constant"
       args:
-        start_rate: float   # multiplier of base alpha at schedule start
-        end_rate: float     # multiplier at schedule end
+        # Either rate-based or absolute-value-based inputs are accepted.
+        # Rate-based (multipliers of base alpha):
+        start_rate: float
+        end_rate: float
+        # Absolute values (override rates if provided):
+        start_value: float
+        end_value: float
         start_step: float   # fraction of total steps where schedule begins (0..1)
         end_step: float     # fraction of total steps where schedule ends (0..1)
 
@@ -665,6 +670,31 @@ class ForkAlphaScheduler(TrainerCallback):
         s0 = int(round(start_frac * self._total_steps))
         s1 = int(round(end_frac * self._total_steps))
         s1 = max(s1, s0 + 1)
+
+        # If absolute values provided, interpolate them and convert to a rate
+        has_abs = ("start_value" in self.args) or ("end_value" in self.args)
+        if has_abs:
+            base = float(self.base_alpha)
+            eps = 1e-12
+            s_val = float(self.args.get("start_value", base * start_rate))
+            e_val = float(self.args.get("end_value", base * end_rate))
+            if step <= s0:
+                return s_val / max(abs(base), eps)
+            if step >= s1:
+                return e_val / max(abs(base), eps)
+
+            t = (step - s0) / max(1, (s1 - s0))
+            if self.sched_type == "linear":
+                val = s_val + t * (e_val - s_val)
+            elif self.sched_type == "cosine":
+                try:
+                    import math
+                    val = s_val + 0.5 * (1.0 - math.cos(math.pi * t)) * (e_val - s_val)
+                except Exception:
+                    val = s_val + t * (e_val - s_val)
+            else:
+                val = s_val + t * (e_val - s_val)
+            return float(val) / max(abs(base), eps)
 
         if step <= s0:
             return start_rate
@@ -826,6 +856,31 @@ class MaxGradNormScheduler(TrainerCallback):
         s0 = int(round(start_frac * self._total_steps))
         s1 = int(round(end_frac * self._total_steps))
         s1 = max(s1, s0 + 1)
+
+        # If user provided absolute values, interpolate those and convert to rate
+        has_abs = ("start_value" in self.args) or ("end_value" in self.args)
+        if has_abs:
+            base = float(self.base_value)
+            eps = 1e-12
+            s_val = float(self.args.get("start_value", base * start_rate))
+            e_val = float(self.args.get("end_value", base * end_rate))
+            if step <= s0:
+                return s_val / max(abs(base), eps)
+            if step >= s1:
+                return e_val / max(abs(base), eps)
+
+            t = (step - s0) / max(1, (s1 - s0))
+            if self.sched_type == "linear":
+                val = s_val + t * (e_val - s_val)
+            elif self.sched_type == "cosine":
+                try:
+                    import math
+                    val = s_val + 0.5 * (1.0 - math.cos(math.pi * t)) * (e_val - s_val)
+                except Exception:
+                    val = s_val + t * (e_val - s_val)
+            else:
+                val = s_val + t * (e_val - s_val)
+            return float(val) / max(abs(base), eps)
 
         if step <= s0:
             return start_rate
