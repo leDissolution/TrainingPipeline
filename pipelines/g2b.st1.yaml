@@ -28,9 +28,7 @@ stages:
       name: gate_lr
       param_ranges:
         peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
-        training.max_grad_norm_schedule: ["linear"]
-        training.max_grad_norm_schedule.args.start_value: [0.01]
-        training.max_grad_norm_schedule.args.end_value: [1.5, 2.0]
+        layerwise_lr.groups["mlp"]: [0.33]
 
   - name: stage1
     env_variables:

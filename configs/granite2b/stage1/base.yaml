@@ -39,6 +39,17 @@ layerwise_lr:
       suffixes: ["embed_tokens", "lm_head"]
       lr_scale: 0.01
       force_require_grad: true
+    - name: mlp
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: { start: 0, end: 40 }
+      lr_scale: 0.33
+      force_require_grad: true
+    - name: layernorms
+      suffixes: ["input_layernorm"]
+      layers: { start: 0, end: 40 }
+      lr_scale: 0.16
+      force_enable: false
+      force_require_grad: true
 
 training:
   output_dir: "${WORK_BASE}/g2b-stage1"
