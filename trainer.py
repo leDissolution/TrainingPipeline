@@ -477,7 +477,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         logit_scale = float(model.config.logits_scaling) if hasattr(model.config, "logits_scaling") else 1.0 # type: ignore[arg-type]
 
         logits = outputs["logits"] if isinstance(outputs, dict) else outputs.logits
-        loss = self._fork_weighted_shifted_loss(logits, labels, fork_mask, logit_divider=logit_scale)
+        loss = self._fork_weighted_loss(logits, labels, fork_mask, logit_divider=logit_scale)
 
         # Per-example logging (opt-in)
         if self._pe_log_topk > 0:
@@ -545,7 +545,7 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
                 self._last_batch_per_example = None
         return (loss, outputs) if return_outputs else loss
 
-    def _fork_weighted_shifted_loss(
+    def _fork_weighted_loss(
             self,
             logits: torch.Tensor,
             labels: torch.Tensor,
@@ -566,7 +566,6 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
             reduction="none",
         ).view_as(shift_labels).float()
 
-        # Robust mask handling: if no fork_mask provided, treat as all False (apply alpha everywhere)
         if fork_mask is None:
             shift_mask = torch.zeros_like(shift_labels, dtype=torch.bool)
         else:

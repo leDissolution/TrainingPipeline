@@ -29,7 +29,8 @@ stages:
       param_ranges:
         peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
         training.max_grad_norm_schedule: ["linear"]
-        training.max_grad_norm_schedule.args.start_value: [0.01, 0.1]
+        training.max_grad_norm_schedule.args.start_value: [0.01]
+        training.max_grad_norm_schedule.args.end_value: [1.5, 2.0]
 
   - name: stage1
     env_variables:

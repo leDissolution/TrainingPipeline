@@ -763,6 +763,10 @@ def main() -> None:
             "trainer": trainer_args_dict,
             "peft": lora_info,
             "layerwise_lr": layerwise_dump,
+            "training": {
+                "max_grad_norm": float((cfg.get("training", {}) or {}).get("max_grad_norm", 1.0)),
+                "max_grad_norm_schedule": ((cfg.get("training", {}) or {}).get("max_grad_norm_schedule", None) or None),
+            },
             "loss": {
                 "trainer_class": ("ForkWeighedLossTrainer" if use_fork_loss else "LayerwiseLRTrainer"),
                 "use_fork_weighed": use_fork_loss,
