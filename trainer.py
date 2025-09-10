@@ -465,7 +465,6 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         num_items_in_batch: Optional[int] = None,
     ):
         fork_mask = inputs.pop(self._fork_mask_key, None)
-        # Extract example IDs before passing inputs to model
         batch_ex_ids = self._extract_example_ids_from_inputs(inputs)
 
         labels = inputs.get("labels", None)
@@ -477,7 +476,12 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         logit_scale = float(model.config.logits_scaling) if hasattr(model.config, "logits_scaling") else 1.0 # type: ignore[arg-type]
 
         logits = outputs["logits"] if isinstance(outputs, dict) else outputs.logits
-        loss = self._fork_weighted_loss(logits, labels, fork_mask, logit_divider=logit_scale)
+        # IMPORTANT: Apply fork weighting ONLY during training. For evaluation/validation,
+        # fall back to standard cross-entropy so reported metrics reflect ordinary CE.
+        if model.training:
+            loss = self._fork_weighted_loss(logits, labels, fork_mask, logit_divider=logit_scale)
+        else:
+            loss = self._standard_ce_loss(logits, labels, logit_divider=logit_scale)
 
         # Per-example logging (opt-in)
         if self._pe_log_topk > 0:
@@ -579,3 +583,32 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         loss = num / den
 
         return loss
+
+    def _standard_ce_loss(
+            self,
+            logits: torch.Tensor,
+            labels: torch.Tensor,
+            logit_divider: float = 1.0,
+    ) -> torch.Tensor:
+        """Plain token-level cross-entropy averaged over valid (non-ignore) tokens.
+
+        Used for evaluation so metrics are comparable / not influenced by fork weighting.
+        """
+        if logit_divider != 0:
+            logits = logits / logit_divider
+
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        vocab = shift_logits.size(-1)
+
+        per_token = F.cross_entropy(
+            shift_logits.float().view(-1, vocab),
+            shift_labels.view(-1),
+            ignore_index=self._ignore_index,
+            reduction="none",
+        ).view_as(shift_labels).float()
+
+        valid = (shift_labels != self._ignore_index)
+        num = (per_token * valid).sum(dtype=torch.float32)
+        den = valid.sum(dtype=torch.float32).clamp_min(1)
+        return num / den

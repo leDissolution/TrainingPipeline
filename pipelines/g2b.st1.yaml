@@ -27,9 +27,11 @@ stages:
       base_config: configs/granite2b/stage1/base.yaml
       name: gate_lr
       param_ranges:
-        peft.random_state: [42, 1234, 3407, 5678, 9999, 10000]
-        layerwise_lr.groups["mlp"].lr_scale: [0.33]
-        training.weight_decay: [0.001]
+        peft.random_state: [10000]
+        layerwise_lr.groups["mlp"].lr_scale: [0, 0.33]
+        layerwise_lr.groups["layernorms"].lr_scale: [0, 0.16]
+        training.gradient_accumulation_steps: [2]
+        training.effective_batch_size: [48]
 
   - name: stage1
     env_variables:
