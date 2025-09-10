@@ -28,10 +28,7 @@ stages:
       name: gate_lr
       param_ranges:
         peft.random_state: [10000]
-        layerwise_lr.groups["mlp"].lr_scale: [0, 0.33]
-        layerwise_lr.groups["layernorms"].lr_scale: [0, 0.16]
-        training.gradient_accumulation_steps: [2]
-        training.effective_batch_size: [48]
+        loss.fork_alpha_schedule.args.start_rate: [0.3, 0.5, 0.7]
 
   - name: stage1
     env_variables:
