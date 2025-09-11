@@ -30,7 +30,6 @@ stages:
       venv: ../DatasetProcessor/.venv
       args:
         --base_path: "${DATASET}"
-        --out_path: "${DATASET}/Assembled"
 
   - name: stage2_make_sweeps
     make_sweeps:
