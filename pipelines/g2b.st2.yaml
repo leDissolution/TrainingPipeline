@@ -37,7 +37,7 @@ stages:
       name: seeds
       param_ranges:
         peft.random_state: [42, 1234]
-        layerwise_lr.groups["mlp"].lr_scale: [0.33]
+        peft.r: [96, 64]
 
   - name: stage2
     env_variables:
