@@ -29,6 +29,11 @@ layerwise_lr:
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
       lr_scale: 0.001
+    - name: mlp
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: { start: 0, end: 40 }
+      lr_scale: 0.33
+      force_enable: true
 
 training:
   output_dir: "${WORK_BASE}/g2b-stage2"
