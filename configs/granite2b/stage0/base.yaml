@@ -92,7 +92,7 @@ training:
   output_dir: "${WORK_BASE}/g2b-stage0"
   merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
   #merge_output_dir: null
-  effective_batch_size: 6
+  effective_batch_size: 10
   gradient_accumulation_steps: 1
   warmup_ratio: 0.05
   lr_scheduler_type: cosine_with_min_lr
@@ -101,7 +101,7 @@ training:
   weight_decay: 0.001
   adam_beta1: 0.9
   adam_beta2: 0.999
-  num_train_epochs: 1
+  num_train_epochs: 2
   max_grad_norm: 1.0
   logging_steps: 1
   save_strategy: epoch

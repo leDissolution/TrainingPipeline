@@ -4,6 +4,12 @@ vars:
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
 
 stages:
+  - name: pull_stage1_from_hf
+    pull_from_hf:
+      model_id: LeDissolution/statsuite_stage0
+      output_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+      var_name: STAGE1_BEST
+
   - name: prepare_dataset
     script:
       name: ../DatasetProcessor/prepare_dataset.py
@@ -11,22 +17,29 @@ stages:
       args:
         --base_path: "${DATASET_BASE}"
         --out_path: "${DATASET}"
-        --with_loss: false
-        --with_chats: false
+        --with_loss: true
+        --with_chats: true
         --with_synthetic: true
         --clean: true
+        --model_name: "${STAGE1_BEST}"
+        --devices: "0"
 
-  - name: stage0_make_sweeps
+  - name: assemble_dataset
+    script:
+      name: ../DatasetProcessor/assemble_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET}"
+        --out_path: "${DATASET}/Assembled"
+
+  - name: stage2_make_sweeps
     make_sweeps:
-      base_config: configs/granite2b/stage0/base.yaml
-      name: lr_boost_rank
+      base_config: configs/granite2b/stage2/base.yaml
+      name: seeds
       param_ranges:
-        training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.merge_output_dir: [null]
-        training.num_train_epochs: [2]
-        training.effective_batch_size: [10]
+        peft.random_state: [42, 1234]
 
-  - name: stage0
+  - name: stage2
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
         value: 0
@@ -39,30 +52,5 @@ stages:
     script:
       name: train.py
       args:
-        --config: #configs/granite2b/stage0/base.yaml
-          sweep: configs/granite2b/stage0/lr_boost_rank
-
-  - name: pick_best_stage0
-    select_best:
-      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-      metric: exact_match
-      prefer: max
-      file: last_eval_metrics.json
-      var_name: STAGE0_BEST
-      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
-
-  - name: stage2_make_sweeps
-    make_sweeps:
-      base_config: configs/granite2b/stage2/base.yaml
-      name: gate_lr
-      param_ranges:
-        peft.random_state: [42, 1234]
-
-  - name: stage2
-    env_variables:
-      - name: CUDA_VISIBLE_DEVICES
-        value: 0
-    script:
-      name: train.py
-      args:
-        --config: ${CONFIG_BASE}/granite2b/stage2/base.yaml
+        --config: #${CONFIG_BASE}/granite2b/stage2/base.yaml
+          sweep: configs/granite2b/stage2/seeds

@@ -2,9 +2,9 @@ extends: ../base.yaml
 
 dataset:
   train_files:
-  - "${DATASET}/Processed-stage1/Assembled/train_high.jsonl"
+  - "${DATASET}/Assembled/train_high.jsonl"
   eval_files:
-  - "${DATASET}/Processed-stage1/Assembled/eval.jsonl"
+  - "${DATASET}/Assembled/eval.jsonl"
 
 model:
   model_name: "${STAGE1_BEST}"

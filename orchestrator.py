@@ -18,7 +18,7 @@ import re
 @dataclass
 class Stage:
     name: str
-    kind: str  # 'script' | 'make_sweeps' | 'select_best' | 'pull_from_hf'
+    kind: str  # 'script' | 'make_sweeps' | 'select_best' | 'pull_from_hf' | 'publish_to_hf'
     script: Optional[str]
     venv: Optional[str]
     args: Dict[str, Any]
@@ -26,6 +26,7 @@ class Stage:
     sweeps: Optional[Dict[str, Any]]
     select: Optional[Dict[str, Any]]
     pull: Optional[Dict[str, Any]]
+    publish: Optional[Dict[str, Any]] = None
 
 
 def _is_windows() -> bool:
@@ -220,7 +221,7 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
         for e in st.get("env_variables", []) or []:
             if isinstance(e, dict) and "name" in e:
                 env_vars[str(e["name"])] = _to_str(e.get("value", ""))
-
+        # make_sweeps stage
         if "make_sweeps" in st and st.get("make_sweeps") is not None:
             sweeps_cfg = st.get("make_sweeps") or {}
             stages.append(
@@ -234,10 +235,12 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                     sweeps=sweeps_cfg,
                     select=None,
                     pull=None,
+                    publish=None,
                 )
             )
             continue
 
+        # select_best stage
         if "select_best" in st and st.get("select_best") is not None:
             sel_cfg = st.get("select_best") or {}
             stages.append(
@@ -251,6 +254,7 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                     sweeps=None,
                     select=sel_cfg,
                     pull=None,
+                    publish=None,
                 )
             )
             continue
@@ -269,10 +273,31 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                     sweeps=None,
                     select=None,
                     pull=pull_cfg,
+                    publish=None,
                 )
             )
             continue
 
+        # publish_to_hf stage
+        if "publish_to_hf" in st and st.get("publish_to_hf") is not None:
+            pub_cfg = st.get("publish_to_hf") or {}
+            stages.append(
+                Stage(
+                    name=name,
+                    kind="publish_to_hf",
+                    script=None,
+                    venv=None,
+                    args={},
+                    env=env_vars,
+                    sweeps=None,
+                    select=None,
+                    pull=None,
+                    publish=pub_cfg,
+                )
+            )
+            continue
+
+        # Generic script stage
         script_info = st.get("script", {}) or {}
         script = str(script_info.get("name"))
         venv = script_info.get("venv")
@@ -289,9 +314,10 @@ def _collect_stages(pipeline_yaml: str, data: Dict[str, Any]) -> Tuple[str, List
                 venv=str(venv) if venv else None,
                 args=args_map,
                 env=env_vars,
-                    sweeps=None,
-                    select=None,
-                    pull=None,
+                sweeps=None,
+                select=None,
+                pull=None,
+                publish=None,
             )
         )
     return repo_root, stages
@@ -807,7 +833,7 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
                     return overall_rc
             continue
 
-        # Handle pull_from_hf stages
+    # Handle pull_from_hf stages
         if st.kind == "pull_from_hf":
             stage_log_dir = os.path.join(base_log_dir, f"{s_idx+1:02d}_{st.name}")
             _ensure_dir(stage_log_dir)
@@ -888,6 +914,97 @@ def run_pipeline(pipeline_yaml: str, stop_on_fail: bool = True, dry_run: bool = 
                         lf.write(f"set ${var_name}={output_dir}\n")
             except Exception as e:
                 print(f"[orchestrator] pull_from_hf failed: {e}")
+                overall_rc = 1
+                if stop_on_fail:
+                    return overall_rc
+            continue
+
+        # Handle publish_to_hf stages
+        if st.kind == "publish_to_hf":
+            stage_log_dir = os.path.join(base_log_dir, f"{s_idx+1:02d}_{st.name}")
+            _ensure_dir(stage_log_dir)
+            try:
+                pub_cfg = _deep_interpolate(st.publish or {}, scope_vars)
+                model_id = str(pub_cfg.get("model_id", "")).strip()
+                from_dir_raw = str(pub_cfg.get("from_dir", "")).strip()
+                token_env = str(pub_cfg.get("token_env", "HUGGINGFACE_TOKEN")).strip()
+                repo_type = str(pub_cfg.get("repo_type", "model")).strip()
+                commit_message = str(pub_cfg.get("commit_message", f"Upload from pipeline stage {st.name}")).strip()
+                allow_patterns = pub_cfg.get("allow_patterns")
+                ignore_patterns = pub_cfg.get("ignore_patterns")
+                private = bool(pub_cfg.get("private", False))
+                var_name = str(pub_cfg.get("var_name", "PUBLISHED_MODEL_ID")).strip()
+                if not model_id:
+                    raise ValueError("publish_to_hf.model_id is required")
+                if not from_dir_raw:
+                    raise ValueError("publish_to_hf.from_dir is required")
+                from_dir = _normpath(repo_root, from_dir_raw)
+                if not os.path.isdir(from_dir):
+                    raise ValueError(f"publish_to_hf.from_dir '{from_dir}' does not exist or is not a directory")
+
+                token_val = os.environ.get(token_env) or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN") or os.environ.get("HF_HUB_TOKEN")
+                if not token_val:
+                    print(f"[orchestrator] Warning: No Hugging Face token found in env var '{token_env}' (or HF_TOKEN/HF_HUB_TOKEN). Attempting unauthenticated upload (likely to fail for private repos).")
+
+                summary_path = os.path.join(stage_log_dir, "stage.log")
+                if dry_run:
+                    with open(summary_path, "w", encoding="utf-8") as lf:
+                        lf.write(f"Would publish '{from_dir}' -> '{model_id}' (repo_type={repo_type}, private={private}) using token env '{token_env}'.\n")
+                        if allow_patterns:
+                            lf.write(f"allow_patterns={allow_patterns}\n")
+                        if ignore_patterns:
+                            lf.write(f"ignore_patterns={ignore_patterns}\n")
+                    # Set var anyway
+                    scope_vars[var_name] = model_id
+                    if isinstance(pipeline_vars, dict):
+                        pipeline_vars[var_name] = model_id
+                    continue
+
+                try:
+                    from huggingface_hub import create_repo, upload_folder, login
+                except Exception as e:
+                    print(f"[orchestrator] Error: huggingface_hub not installed: {e}")
+                    overall_rc = 1
+                    if stop_on_fail:
+                        return overall_rc
+                    continue
+
+                # Authenticate
+                if token_val:
+                    try:
+                        login(token=token_val, write_permission=True, add_to_git_credential=False)
+                    except Exception as e:
+                        print(f"[orchestrator] Warning: login failed, proceeding with direct token usage: {e}")
+
+                try:
+                    create_repo(model_id, private=private, exist_ok=True, repo_type=repo_type, token=token_val)
+                except Exception as e:
+                    print(f"[orchestrator] Warning: create_repo failed (may already exist or insufficient perms): {e}")
+
+                try:
+                    upload_folder(
+                        folder_path=from_dir,
+                        repo_id=model_id,
+                        repo_type=repo_type,
+                        token=token_val,
+                        commit_message=commit_message,
+                        allow_patterns=allow_patterns,
+                        ignore_patterns=ignore_patterns,
+                    )
+                except Exception as e:
+                    print(f"[orchestrator] publish_to_hf failed: {e}")
+                    overall_rc = 1
+                    if stop_on_fail:
+                        return overall_rc
+                else:
+                    scope_vars[var_name] = model_id
+                    if isinstance(pipeline_vars, dict):
+                        pipeline_vars[var_name] = model_id
+                    with open(summary_path, "w", encoding="utf-8") as lf:
+                        lf.write(f"Published {from_dir} -> {model_id} (repo_type={repo_type})\n")
+                        lf.write(f"set ${var_name}={model_id}\n")
+            except Exception as e:
+                print(f"[orchestrator] publish_to_hf failed: {e}")
                 overall_rc = 1
                 if stop_on_fail:
                     return overall_rc
