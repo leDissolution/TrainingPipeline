@@ -38,6 +38,8 @@ stages:
       param_ranges:
         peft.random_state: [42, 1234]
         peft.r: [96, 64]
+        layerwise_lr.base_lr: [4.0e-5, 1.0e-5]
+        training.merge_output_dir: [null]
 
   - name: stage2
     env_variables:
@@ -54,3 +56,7 @@ stages:
       args:
         --config: #${CONFIG_BASE}/granite2b/stage2/base.yaml
           sweep: configs/granite2b/stage2/seeds
+
+  - name: shutdown
+    script:
+      name: shutdown.py
