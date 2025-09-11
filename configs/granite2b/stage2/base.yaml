@@ -45,9 +45,8 @@ training:
   num_train_epochs: 1
   max_grad_norm: 1.0
   logging_steps: 1
-  save_strategy: steps
-  save_steps: 100
-  save_only_model: false
+  save_strategy: epoch
+  save_only_model: true
   eval_strategy: steps
   eval_steps: 100
   eval_on_start: true
