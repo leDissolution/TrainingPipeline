@@ -19,13 +19,9 @@ stages:
   - name: stage0_make_sweeps
     make_sweeps:
       base_config: configs/granite2b/stage0/base.yaml
-      name: lr_boost_rank
+      name: seeds
       param_ranges:
         training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.merge_output_dir: [null]
-        training.num_train_epochs: [2]
-        training.effective_batch_size: [10]
-        training.run_name: ["with_full_synth"]
 
   - name: stage0
     env_variables:
@@ -41,7 +37,7 @@ stages:
       name: train.py
       args:
         --config: #configs/granite2b/stage0/base.yaml
-          sweep: configs/granite2b/stage0/lr_boost_rank
+          sweep: configs/granite2b/stage0/seeds
 
   - name: pick_best_stage0
     select_best:
