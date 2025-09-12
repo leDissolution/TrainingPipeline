@@ -32,7 +32,7 @@ layerwise_lr:
 training:
   output_dir: "${WORK_BASE}/g2b-stage2"
   merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage2"
-  effective_batch_size: 24
+  effective_batch_size: 12
   gradient_accumulation_steps: 3
   warmup_ratio: 0.1
   lr_scheduler_type: cosine_with_min_lr
