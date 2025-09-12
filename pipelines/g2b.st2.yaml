@@ -56,19 +56,44 @@ stages:
         --config: #${CONFIG_BASE}/granite2b/stage2/base.yaml
           sweep: configs/granite2b/stage2/seeds
 
-  - name: pick_best_stage2
-    select_best:
-      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
-      metric: exact_match
-      prefer: max
-      file: last_eval_metrics.json
-      var_name: STAGE2_BEST
-      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
+  - name: stage2_make_sweeps_2
+    make_sweeps:
+      base_config: configs/granite2b/stage2/base.yaml
+      name: seeds
+      param_ranges:
+        peft.random_state: [42, 1234, 3407]
+        training.effective_batch_size: [72]
+        training.num_train_epochs: [3]
 
-  - name: publish_stage2_to_hf
-    publish_to_hf:
-      model_id: LeDissolution/statsuite_stage2
-      from_dir: ${STAGE2_BEST}
+  - name: stage2_2
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 0
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
+    script:
+      name: train.py
+      args:
+        --config: #${CONFIG_BASE}/granite2b/stage2/base.yaml
+          sweep: configs/granite2b/stage2/seeds
+
+  # - name: pick_best_stage2
+  #   select_best:
+  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
+  #     metric: exact_match
+  #     prefer: max
+  #     file: last_eval_metrics.json
+  #     var_name: STAGE2_BEST
+  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
+
+  # - name: publish_stage2_to_hf
+  #   publish_to_hf:
+  #     model_id: LeDissolution/statsuite_stage2
+  #     from_dir: ${STAGE2_BEST}
 
   - name: shutdown
     script:
