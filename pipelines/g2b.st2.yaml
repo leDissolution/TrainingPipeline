@@ -37,7 +37,8 @@ stages:
       name: seeds
       param_ranges:
         peft.random_state: [42, 1234]
-        peft.r: [32, 16]
+        peft.r: [64, 32]
+        training.run_name: ["fixed_ds"]
         training.merge_output_dir: [null]
 
   - name: stage2
