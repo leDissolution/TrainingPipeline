@@ -28,11 +28,21 @@ layerwise_lr:
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
       lr_scale: 0.001
+    - name: layer0
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: [0]
+      lr_scale: 1
+      force_enable: true
+    - name: layer0_norm
+      suffixes: ["input_layernorm"]
+      layers: [0]
+      lr_scale: 0.33
+      force_require_grad: true
 
 training:
   output_dir: "${WORK_BASE}/g2b-stage2"
   merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage2"
-  effective_batch_size: 12
+  effective_batch_size: 24
   gradient_accumulation_steps: 3
   warmup_ratio: 0.1
   lr_scheduler_type: cosine_with_min_lr
