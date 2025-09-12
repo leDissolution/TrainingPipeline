@@ -37,8 +37,7 @@ stages:
       name: seeds
       param_ranges:
         peft.random_state: [42, 1234]
-        peft.r: [96, 64]
-        layerwise_lr.base_lr: [4.0e-5, 1.0e-5]
+        peft.r: [32, 16]
         training.merge_output_dir: [null]
 
   - name: stage2
