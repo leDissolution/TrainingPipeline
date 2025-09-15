@@ -10,26 +10,26 @@ stages:
       output_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
       var_name: STAGE1_BEST
 
-  - name: prepare_dataset
-    script:
-      name: ../DatasetProcessor/prepare_dataset.py
-      venv: ../DatasetProcessor/.venv
-      args:
-        --base_path: "${DATASET_BASE}"
-        --out_path: "${DATASET}"
-        --with_loss: true
-        --with_chats: true
-        --with_synthetic: true
-        --clean: true
-        --model_name: "${STAGE1_BEST}"
-        --devices: "0,1,2,3"
+  # - name: prepare_dataset
+  #   script:
+  #     name: ../DatasetProcessor/prepare_dataset.py
+  #     venv: ../DatasetProcessor/.venv
+  #     args:
+  #       --base_path: "${DATASET_BASE}"
+  #       --out_path: "${DATASET}"
+  #       --with_loss: true
+  #       --with_chats: true
+  #       --with_synthetic: true
+  #       --clean: true
+  #       --model_name: "${STAGE1_BEST}"
+  #       --devices: "0,1,2,3"
 
-  - name: assemble_dataset
-    script:
-      name: ../DatasetProcessor/assemble_dataset.py
-      venv: ../DatasetProcessor/.venv
-      args:
-        --base_path: "${DATASET}"
+  # - name: assemble_dataset
+  #   script:
+  #     name: ../DatasetProcessor/assemble_dataset.py
+  #     venv: ../DatasetProcessor/.venv
+  #     args:
+  #       --base_path: "${DATASET}"
 
   - name: stage2_make_sweeps
     make_sweeps:
