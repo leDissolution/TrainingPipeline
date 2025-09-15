@@ -37,6 +37,7 @@ stages:
       name: seeds
       param_ranges:
         peft.random_state: [42, 1234, 3407, 5678]
+        
   - name: stage2
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
