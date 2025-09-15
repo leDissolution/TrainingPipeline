@@ -37,8 +37,8 @@ stages:
       name: seeds
       param_ranges:
         peft.random_state: [42, 1234]
-        layerwise_lr.groups["layer0"].lr_scale: [1, 0.5]
-        layerwise_lr.groups["layer0_norm"].lr_scale: [0.5, 0]
+        run_name: ["dapth_anneal"]
+        layerwise_lr.groups["tail"].lr_scale: [0.1, 0]
 
   - name: stage2
     env_variables:
