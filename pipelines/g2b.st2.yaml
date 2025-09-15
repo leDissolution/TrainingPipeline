@@ -22,7 +22,7 @@ stages:
         --with_synthetic: true
         --clean: true
         --model_name: "${STAGE1_BEST}"
-        --devices: "0"
+        --devices: "0,1,2,3"
 
   - name: assemble_dataset
     script:
@@ -38,7 +38,7 @@ stages:
       param_ranges:
         peft.random_state: [42, 1234]
         run_name: ["dapth_anneal"]
-        layerwise_lr.groups["tail"].lr_scale: [0.1, 0]
+        layerwise_lr.groups["tail"].lr_scale: [0.25]
 
   - name: stage2
     env_variables:
