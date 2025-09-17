@@ -52,3 +52,7 @@ stages:
     publish_to_hf:
       model_id: LeDissolution/statsuite_stage0
       from_dir: ${STAGE0_BEST}
+
+  - name: shutdown
+    script:
+      name: shutdown.py
