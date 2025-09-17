@@ -38,6 +38,7 @@ stages:
       param_ranges:
         peft.random_state: [42]
         training.merge_output_dir: [null]
+        training.gradient_accumulation_steps: [4]
         
   - name: stage2
     env_variables:
