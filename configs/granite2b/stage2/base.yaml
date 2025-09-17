@@ -27,7 +27,7 @@ layerwise_lr:
   groups:
     - name: embed
       suffixes: ["embed_tokens", "lm_head"]
-      lr_scale: 0.001
+      lr_scale: 0.01
     - name: head
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
       layers: [0, 1, 2]
@@ -41,7 +41,7 @@ layerwise_lr:
     - name: tail
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
       layers: { start: 35, end: 40 }
-      lr_scale: 0.1
+      lr_scale: 0.15
       force_enable: true
 
 training:
