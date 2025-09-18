@@ -36,9 +36,7 @@ stages:
       base_config: configs/granite2b/stage2/base.yaml
       name: seeds
       param_ranges:
-        peft.random_state: [42]
-        training.merge_output_dir: [null]
-        training.run_name: ["new_ds"]
+        peft.random_state: [42, 1234, 3407]
         
   - name: stage2
     env_variables:
@@ -56,34 +54,34 @@ stages:
         --config: #${CONFIG_BASE}/granite2b/stage2/base.yaml
           sweep: configs/granite2b/stage2/seeds
 
-  # - name: pick_best_stage2
-  #   select_best:
-  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
-  #     metric: exact_match
-  #     prefer: max
-  #     file: last_eval_metrics.json
-  #     var_name: STAGE2_BEST
-  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
+  - name: pick_best_stage2
+    select_best:
+      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
+      metric: exact_match
+      prefer: max
+      file: last_eval_metrics.json
+      var_name: STAGE2_BEST
+      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2
 
-  # - name: publish_stage2_to_hf
-  #   publish_to_hf:
-  #     model_id: LeDissolution/statsuite_stage2
-  #     from_dir: ${STAGE2_BEST}
+  - name: publish_stage2_to_hf
+    publish_to_hf:
+      model_id: LeDissolution/statsuite_stage2
+      from_dir: ${STAGE2_BEST}
 
-  # - name: prepare_dataset_post
-  #   script:
-  #     name: ../DatasetProcessor/prepare_dataset.py
-  #     venv: ../DatasetProcessor/.venv
-  #     args:
-  #       --base_path: "${DATASET_BASE}"
-  #       --out_path: "${DATASET}_post"
-  #       --with_loss: true
-  #       --with_chats: true
-  #       --with_synthetic: true
-  #       --clean: true
-  #       --model_name: "${STAGE2_BEST}"
-  #       --devices: "0,1,2,3"
+  - name: prepare_dataset_post
+    script:
+      name: ../DatasetProcessor/prepare_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --out_path: "${DATASET}_post"
+        --with_loss: true
+        --with_chats: true
+        --with_synthetic: true
+        --clean: true
+        --model_name: "${STAGE2_BEST}"
+        --devices: "0,1,2,3"
 
-  # - name: shutdown
-  #   script:
-  #     name: shutdown.py
+  - name: shutdown
+    script:
+      name: shutdown.py
