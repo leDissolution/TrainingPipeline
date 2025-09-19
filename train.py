@@ -652,6 +652,7 @@ def main() -> None:
         gradient_accumulation_steps=int(train_cfg.get("gradient_accumulation_steps", 1)),
         dataset_num_proc=int(train_cfg.get("dataset_num_proc", 1)),
         warmup_ratio=float(train_cfg.get("warmup_ratio", 0.0)),
+        label_smoothing_factor=float(train_cfg.get("label_smoothing_factor", 0.0)),
         lr_scheduler_type=str(train_cfg.get("lr_scheduler_type", "linear")),
         lr_scheduler_kwargs=train_cfg.get("lr_scheduler_kwargs", {}),
         learning_rate=float(train_cfg.get("learning_rate", base_lr)),
