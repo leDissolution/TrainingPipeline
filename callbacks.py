@@ -86,8 +86,31 @@ class MetricCalculator:
             self.noop_str = "!!no_change!!"
 
     def keep_argmax(self, logits, labels):
-        # logits: (B, S, V)
-        return torch.argmax(logits, dim=-1)
+        # Compute lightweight artifacts to avoid materializing logits across eval:
+        # - argmax token ids for decoding
+        # - per-example average NLL over valid tokens (for percentile logging)
+        # Shapes: logits (B, S, V), labels (B, S)
+        with torch.no_grad():
+            pred_ids = torch.argmax(logits, dim=-1)  # (B, S)
+
+            # Align for causal LM: predict token t+1 from logits at t
+            shifted_logits = logits[:, :-1, :]
+            shifted_labels = labels[:, 1:]
+
+            valid_mask = shifted_labels.ne(self.ignore_index)
+            if valid_mask.any():
+                safe_labels = shifted_labels.masked_fill(~valid_mask, 0)
+                log_probs = torch.nn.functional.log_softmax(shifted_logits.to(dtype=torch.float32), dim=-1)
+                gathered = torch.gather(log_probs, dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
+                token_nll = -gathered
+                token_nll = token_nll.masked_fill(~valid_mask, 0.0)
+                token_counts = valid_mask.sum(dim=-1).clamp(min=1)
+                per_example_loss = token_nll.sum(dim=-1) / token_counts  # (B,)
+            else:
+                per_example_loss = torch.zeros(pred_ids.size(0), dtype=torch.float32, device=pred_ids.device)
+
+        # Return a tuple so HF concatenates per element across batches
+        return (pred_ids, per_example_loss)
 
     # ------------------------------------------------------------------ #
     # 1)  Decode only the completion part of every sequence - vectorised #
@@ -121,14 +144,36 @@ class MetricCalculator:
     # ------------------------------------------------------------ #
     @torch.no_grad()
     def compute_metrics(self, eval_pred):
-        # `eval_pred` is usually a tuple of (predictions, label_ids)
-        # Keep backward compatibility with both tuple and EvalPrediction-like objects
-        if isinstance(eval_pred, tuple) or isinstance(eval_pred, list):
-            pred_ids, label_ids = map(torch.as_tensor, eval_pred)
+        # Accept both EvalPrediction-like and raw tuple inputs
+        preds_obj = None
+        labels_obj = None
+        if hasattr(eval_pred, "predictions"):
+            preds_obj = getattr(eval_pred, "predictions")
+            labels_obj = getattr(eval_pred, "label_ids")
+        elif isinstance(eval_pred, (tuple, list)) and len(eval_pred) == 2:
+            preds_obj, labels_obj = eval_pred
         else:
-            # EvalPrediction-style with attributes
-            pred_ids = torch.as_tensor(getattr(eval_pred, "predictions"))
-            label_ids = torch.as_tensor(getattr(eval_pred, "label_ids"))
+            preds_obj = eval_pred
+            labels_obj = None
+
+        # Unpack predictions which may be:
+        # - tuple(pred_ids, per_example_loss)
+        # - raw logits (B, S, V) [fallback]
+        # - argmax token ids (B, S)
+        per_example_loss = None
+        logits = None
+        if isinstance(preds_obj, (tuple, list)) and len(preds_obj) == 2:
+            pred_ids = torch.as_tensor(preds_obj[0])
+            try:
+                per_example_loss = torch.as_tensor(preds_obj[1]).to(torch.float32)
+            except Exception:
+                per_example_loss = None
+        else:
+            pred_ids = torch.as_tensor(preds_obj)
+            if pred_ids.dim() == 3:
+                logits = pred_ids
+                pred_ids = torch.argmax(pred_ids, dim=-1)
+        label_ids = torch.as_tensor(labels_obj) if labels_obj is not None else None
 
         # 1) shift (the trainer already shifted labels for
         #    causal-LMs, so usually this is no longer necessary)
@@ -138,35 +183,40 @@ class MetricCalculator:
             logits = pred_ids
             pred_ids = torch.argmax(pred_ids, dim=-1)
         pred_ids = pred_ids[:, :-1]
-        label_ids = label_ids[:, 1:]
+        if label_ids is not None:
+            label_ids = label_ids[:, 1:]
         if logits is not None:
             logits = logits[:, :-1, :]
 
         # noop metrics computed at token-level before decoding
         with torch.no_grad():
-            valid_mask = label_ids.ne(self.ignore_index)
-            if self.noop_id is not None and self.noop_id >= 0:
-                is_noop_label = label_ids.eq(self.noop_id) & valid_mask
-                is_noop_pred  = pred_ids.eq(self.noop_id) & valid_mask
-
-                total_noop_labels = int(is_noop_label.sum().item())
-                correct_noops = int((is_noop_label & is_noop_pred).sum().item())
-                noop_acc_rate = (correct_noops / total_noop_labels) if total_noop_labels > 0 else 0.0
-
-                non_noop_mask = valid_mask & (~is_noop_label)
-                total_non_noop = int(non_noop_mask.sum().item())
-                overused_noops = int((is_noop_pred & non_noop_mask).sum().item())
-                noop_overuse = (overused_noops / total_non_noop) if total_non_noop > 0 else 0.0
-            else:
+            if label_ids is None:
+                valid_mask = pred_ids.ne(pred_ids)  # all False
                 noop_acc_rate = 0.0
                 noop_overuse = 0.0
+            else:
+                valid_mask = label_ids.ne(self.ignore_index)
+                if self.noop_id is not None and self.noop_id >= 0:
+                    is_noop_label = label_ids.eq(self.noop_id) & valid_mask
+                    is_noop_pred  = pred_ids.eq(self.noop_id) & valid_mask
+
+                    total_noop_labels = int(is_noop_label.sum().item())
+                    correct_noops = int((is_noop_label & is_noop_pred).sum().item())
+                    noop_acc_rate = (correct_noops / total_noop_labels) if total_noop_labels > 0 else 0.0
+
+                    non_noop_mask = valid_mask & (~is_noop_label)
+                    total_non_noop = int(non_noop_mask.sum().item())
+                    overused_noops = int((is_noop_pred & non_noop_mask).sum().item())
+                    noop_overuse = (overused_noops / total_non_noop) if total_non_noop > 0 else 0.0
+                else:
+                    noop_acc_rate = 0.0
+                    noop_overuse = 0.0
 
         # 2) extract completion token id sequences for per-example checks
-        mask = label_ids.ne(self.ignore_index)  # (B, S) bool
-        per_example_loss = None
-        if logits is not None:
+        mask = label_ids.ne(self.ignore_index) if label_ids is not None else torch.zeros_like(pred_ids, dtype=torch.bool)  # (B, S) bool
+        # If per_example_loss wasn't provided (older path), compute cheaply from logits if available
+        if per_example_loss is None and logits is not None and label_ids is not None:
             with torch.no_grad():
-                # Compute token-level negative log likelihood for valid tokens only
                 safe_labels = label_ids.masked_fill(~mask, 0)
                 log_probs = F.log_softmax(logits.to(dtype=torch.float32), dim=-1)
                 gathered = torch.gather(log_probs, dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
@@ -176,7 +226,10 @@ class MetricCalculator:
                 per_example_loss = token_nll.sum(dim=-1) / token_counts
 
         pred_seqs_ids  = [p[m].tolist() for p, m in zip(pred_ids, mask)]
-        label_seqs_ids = [l[m].tolist() for l, m in zip(label_ids, mask)]
+        if label_ids is not None:
+            label_seqs_ids = [l[m].tolist() for l, m in zip(label_ids, mask)]
+        else:
+            label_seqs_ids = [[] for _ in range(len(pred_seqs_ids))]
 
         # 2a) decode predicted completion strings
         preds = self.tok.batch_decode(pred_seqs_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
@@ -194,7 +247,10 @@ class MetricCalculator:
             refs = [(r or "") + self.closing_suffix for r in refs]
         else:
             # Fall back to decoding labels to get refs
-            _, refs = self._decode_completions(pred_ids, label_ids)
+            if label_ids is not None:
+                _, refs = self._decode_completions(pred_ids, label_ids)
+            else:
+                refs = [""] * len(preds)
 
         # 3) helpers for text metrics
         def partial_score(p, r, separators):
