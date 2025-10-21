@@ -53,6 +53,7 @@ class HeadDropEvalControl(TrainerCallback):
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import re
 from collections import defaultdict
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -132,10 +133,14 @@ class MetricCalculator:
         # 1) shift (the trainer already shifted labels for
         #    causal-LMs, so usually this is no longer necessary)
         # If predictions are logits (B, S, V), convert to token ids first
+        logits = None
         if pred_ids.dim() == 3:
+            logits = pred_ids
             pred_ids = torch.argmax(pred_ids, dim=-1)
         pred_ids = pred_ids[:, :-1]
         label_ids = label_ids[:, 1:]
+        if logits is not None:
+            logits = logits[:, :-1, :]
 
         # noop metrics computed at token-level before decoding
         with torch.no_grad():
@@ -158,6 +163,18 @@ class MetricCalculator:
 
         # 2) extract completion token id sequences for per-example checks
         mask = label_ids.ne(self.ignore_index)  # (B, S) bool
+        per_example_loss = None
+        if logits is not None:
+            with torch.no_grad():
+                # Compute token-level negative log likelihood for valid tokens only
+                safe_labels = label_ids.masked_fill(~mask, 0)
+                log_probs = F.log_softmax(logits.to(dtype=torch.float32), dim=-1)
+                gathered = torch.gather(log_probs, dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
+                token_nll = -gathered
+                token_nll = token_nll.masked_fill(~mask, 0.0)
+                token_counts = mask.sum(dim=-1).clamp(min=1)
+                per_example_loss = token_nll.sum(dim=-1) / token_counts
+
         pred_seqs_ids  = [p[m].tolist() for p, m in zip(pred_ids, mask)]
         label_seqs_ids = [l[m].tolist() for l, m in zip(label_ids, mask)]
 
@@ -179,7 +196,7 @@ class MetricCalculator:
             # Fall back to decoding labels to get refs
             _, refs = self._decode_completions(pred_ids, label_ids)
 
-    # 3) helpers for text metrics
+        # 3) helpers for text metrics
         def partial_score(p, r, separators):
             def split_multi(s, seps):
                 for sep in seps:
@@ -205,9 +222,9 @@ class MetricCalculator:
             text = re.sub(r'[,\s]+', ' ', text)
             return text
 
-    # 3a) acceptance rule: if first completion label is noop, accept either
-    #      a) prediction equals expected ref+closing suffix, or
-    #      b) prediction equals noop token + closing suffix
+        # 3a) acceptance rule: if first completion label is noop, accept either
+        #      a) prediction equals expected ref+closing suffix, or
+        #      b) prediction equals noop token + closing suffix
         def is_label_first_noop(seq_ids: List[int]) -> bool:
             return len(seq_ids) > 0 and seq_ids[0] == self.noop_id
 
@@ -254,6 +271,15 @@ class MetricCalculator:
             "noop_acc_rate": noop_acc_rate,
             "noop_overuse": noop_overuse,
         }
+
+        # Percentile summaries for per-example cross-entropy over valid tokens
+        if per_example_loss is not None and per_example_loss.numel() > 0:
+            losses_np = per_example_loss.detach().cpu().numpy()
+            metrics["loss_p50"] = float(np.quantile(losses_np, 0.5))
+            metrics["loss_p95"] = float(np.quantile(losses_np, 0.95))
+        else:
+            metrics["loss_p50"] = 0.0
+            metrics["loss_p95"] = 0.0
 
         # Stash per-example success for external callbacks to persist
         try:

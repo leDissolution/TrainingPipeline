@@ -27,6 +27,8 @@ tokens:
     - { token: "unspecified",      init: "undefined" }
     - { token: "nude",             init: "bare" }
     - { token: "genitalia",        init: "sexgender" }
+    - { token: "passages",         init: "doorwindowgate" }
+    - { token: "no underwear",     init: "" }
   grad_boost:
     factor: 5.0
     target: all            # new | all
