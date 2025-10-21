@@ -13,6 +13,7 @@ dataset:
     - noop
     - pose-location
     - mood
+    - passages
 
 model:
   model_name: "ibm-granite/granite-3.1-2b-base"
