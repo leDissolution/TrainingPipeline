@@ -2,6 +2,7 @@ import argparse
 import json
 import gc
 import os
+import glob
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -426,6 +427,34 @@ def main() -> None:
         eval_tpl = str(ds_cfg.get("eval_template", "{stat}.eval.jsonl"))
         train_files = [_normpath_join(base, train_tpl.format(stat=s)) for s in stats]
         eval_files = [_normpath_join(base, eval_tpl.format(stat=s)) for s in stats]
+
+    # Skip non-existent files with a warning, but preserve glob patterns
+    def _has_glob_magic(p: str) -> bool:
+        try:
+            return glob.has_magic(p)
+        except Exception:
+            return False
+
+    def _filter_existing(paths: List[str], kind: str) -> List[str]:
+        existing: List[str] = []
+        missing: List[str] = []
+        for p in paths:
+            if _has_glob_magic(p) or os.path.exists(p):
+                existing.append(p)
+            else:
+                missing.append(p)
+        if missing:
+            print(f"[Data] Warning: skipping {len(missing)} non-existent {kind} file(s):")
+            for m in missing:
+                print(f"         - {m}")
+        return existing
+
+    train_files = _filter_existing(train_files, "train")
+    eval_files = _filter_existing(eval_files, "eval")
+    if not train_files:
+        raise FileNotFoundError("No existing training files found after filtering. Check dataset.train_files/base_path/stats.")
+    if not eval_files:
+        raise FileNotFoundError("No existing evaluation files found after filtering. Check dataset.eval_files/base_path/stats.")
 
     dataset = load_dataset("json", data_files=train_files, split="train")
     eval_dataset = load_dataset("json", data_files=eval_files, split="train")
