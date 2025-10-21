@@ -332,9 +332,11 @@ class MetricCalculator:
         if per_example_loss is not None and per_example_loss.numel() > 0:
             losses_np = per_example_loss.detach().cpu().numpy()
             metrics["loss_p50"] = float(np.quantile(losses_np, 0.5))
+            metrics["loss_p80"] = float(np.quantile(losses_np, 0.8))
             metrics["loss_p95"] = float(np.quantile(losses_np, 0.95))
         else:
             metrics["loss_p50"] = 0.0
+            metrics["loss_p80"] = 0.0
             metrics["loss_p95"] = 0.0
 
         # Stash per-example success for external callbacks to persist
