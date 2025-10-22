@@ -86,14 +86,8 @@ class MetricCalculator:
             self.noop_str = "!!no_change!!"
 
     def keep_argmax(self, logits, labels):
-        # Compute lightweight artifacts to avoid materializing logits across eval:
-        # - argmax token ids for decoding
-        # - per-example average NLL over valid tokens (for percentile logging)
-        # Shapes: logits (B, S, V), labels (B, S)
         with torch.no_grad():
             pred_ids = torch.argmax(logits, dim=-1)  # (B, S)
-
-            # Align for causal LM: predict token t+1 from logits at t
             shifted_logits = logits[:, :-1, :]
             shifted_labels = labels[:, 1:]
 
@@ -109,7 +103,6 @@ class MetricCalculator:
             else:
                 per_example_loss = torch.zeros(pred_ids.size(0), dtype=torch.float32, device=pred_ids.device)
 
-        # Return a tuple so HF concatenates per element across batches
         return (pred_ids, per_example_loss)
 
     # ------------------------------------------------------------------ #

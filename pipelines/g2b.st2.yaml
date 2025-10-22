@@ -37,6 +37,7 @@ stages:
       name: seeds
       param_ranges:
         peft.random_state: [42, 1234, 3407]
+        training.label_smoothing_factor: [0.03]
         loss.use_fork_weighed: [false]
         
   - name: stage2
