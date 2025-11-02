@@ -22,6 +22,7 @@ from trainer import (
     build_target_modules,
     apply_weight_rescale,
 )
+import trainer
 
 
 # ------------------------------
@@ -968,7 +969,12 @@ def main() -> None:
         final_step = int(getattr(trainer.state, "global_step", 0))
         if last_eval_step < final_step and eval_dataset is not None:
             print("[Eval] No eval at final step; running a final evaluation now...")
-            final_metrics = trainer.evaluate()
+            orig = trainer.is_in_train
+            trainer.is_in_train = True
+            try:
+                final_metrics = trainer.evaluate()
+            finally:
+                trainer.is_in_train = orig
             # Short summary print
             try:
                 summary = {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in dict(final_metrics).items()}
