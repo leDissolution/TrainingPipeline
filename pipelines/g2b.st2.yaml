@@ -36,7 +36,9 @@ stages:
       base_config: configs/granite2b/stage2/base.yaml
       name: seeds
       param_ranges:
-        peft.random_state: [42, 1234, 3407]
+        training.dataset_seed: [42, 1234, 3407]
+        training.num_train_epochs: [2]
+        training.adam_beta2: [0.997]
         loss.use_fork_weighed: [false]
         
   - name: stage2
