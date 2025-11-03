@@ -31,17 +31,17 @@ layerwise_lr:
     - name: head
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
       layers: [0, 1, 2]
-      lr_scale: 0.66
+      lr_scale: 0.5
       force_enable: true
     - name: middle
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
       layers: { start: 0, end: 35 }
-      lr_scale: 0.33
+      lr_scale: 0.25
       force_enable: true
     - name: tail
       suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
       layers: { start: 35, end: 40 }
-      lr_scale: 0.15
+      lr_scale: 0.125
       force_enable: true
 
 training:
