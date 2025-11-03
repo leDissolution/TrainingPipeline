@@ -21,8 +21,10 @@ stages:
       base_config: configs/granite2b/stage0/base.yaml
       name: seeds
       param_ranges:
-        training.seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.num_train_epochs: [3, 4]
+        #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
+        training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000]
+        training.num_train_epochs: [3]
+        training.adam_beta2: [0.995, 0.999]
 
   - name: stage0
     env_variables:
