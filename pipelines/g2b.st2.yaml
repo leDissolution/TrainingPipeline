@@ -36,12 +36,44 @@ stages:
       base_config: configs/granite2b/stage2/base.yaml
       name: seeds
       param_ranges:
-        training.dataset_seed: [42, 1234, 3407]
-        training.num_train_epochs: [2]
-        training.adam_beta2: [0.997]
+        training.dataset_seed: [42, 1234]
         loss.use_fork_weighed: [false]
         
   - name: stage2
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 0
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
+    script:
+      name: train.py
+      args:
+        --config: #${CONFIG_BASE}/granite2b/stage2/base.yaml
+          sweep: configs/granite2b/stage2/seeds
+
+  - name: assemble_dataset2
+    script:
+      name: ../DatasetProcessor/assemble_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET}"
+        --exclude_top_percentile: 2
+        --exclude_top_percentile_min_difficulty: 0.5
+        --existing_eval_file: "${DATASET}/Assembled/eval.jsonl"
+
+  - name: stage2_make_sweeps_2
+    make_sweeps:
+      base_config: configs/granite2b/stage2/base.yaml
+      name: seeds
+      param_ranges:
+        training.dataset_seed: [42, 1234]
+        loss.use_fork_weighed: [false]
+        
+  - name: stage2_exclude_2
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
         value: 0
