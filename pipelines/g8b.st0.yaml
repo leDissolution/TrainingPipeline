@@ -37,6 +37,7 @@ stages:
     script:
       name: train.py
       args:
+        --config: #configs/granite2b/stage0/base.yaml
           sweep: configs/granite8b/stage0/seeds
 
   - name: pick_best_stage0
