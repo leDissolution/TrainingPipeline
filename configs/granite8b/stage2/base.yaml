@@ -1,0 +1,73 @@
+extends: ../base.yaml
+
+dataset:
+  train_files:
+  - "${DATASET}/Assembled/train_high.jsonl"
+  eval_files:
+  - "${DATASET}/Assembled/eval.jsonl"
+
+model:
+  model_name: "${STAGE1_BEST}"
+
+peft:
+  r: 64
+  lora_alpha: rank
+  lora_dropout: 0.0
+  modules_to_save:
+    - embed_tokens
+    - lm_head
+  modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+layerwise_lr:
+  base_lr: 4.0e-5
+  groups:
+    - name: embed
+      suffixes: ["embed_tokens", "lm_head"]
+      lr_scale: 0.01
+    - name: head
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: [0, 1, 2]
+      lr_scale: 0.5
+      force_enable: true
+    - name: middle
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: { start: 0, end: 35 }
+      lr_scale: 0.25
+      force_enable: true
+    - name: tail
+      suffixes: ["mlp.up_proj", "mlp.gate_proj", "mlp.down_proj"]
+      layers: { start: 35, end: 40 }
+      lr_scale: 0.125
+      force_enable: true
+
+training:
+  output_dir: "${WORK_BASE}/g2b-stage2"
+  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage2"
+  effective_batch_size: 24
+  gradient_accumulation_steps: 6
+  warmup_ratio: 0.1
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.5
+  weight_decay: 0.01
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  num_train_epochs: 1
+  max_grad_norm: 1.0
+  logging_steps: 1
+  save_strategy: epoch
+  save_only_model: true
+  eval_strategy: steps
+  eval_steps: 100
+  eval_on_start: true
+  per_device_eval_batch_size: 8
+  torch_empty_cache_steps: 2
+
+loss:
+  use_fork_weighed: true
+  fork_mask_key: fork_mask
+  fork_alpha: 1.0
