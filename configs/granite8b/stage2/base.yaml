@@ -45,10 +45,10 @@ layerwise_lr:
       force_enable: true
 
 training:
-  output_dir: "${WORK_BASE}/g2b-stage2"
-  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage2"
+  output_dir: "${WORK_BASE}/${MODEL_NAME}-stage2"
+  merge_output_dir: "${ARTIFACTORY_BASE}/${MODEL_NAME}-stage2"
   effective_batch_size: 24
-  gradient_accumulation_steps: 6
+  gradient_accumulation_steps: 8
   warmup_ratio: 0.1
   lr_scheduler_type: cosine_with_min_lr
   lr_scheduler_kwargs:
@@ -64,7 +64,7 @@ training:
   eval_strategy: steps
   eval_steps: 100
   eval_on_start: true
-  per_device_eval_batch_size: 8
+  per_device_eval_batch_size: 6
   torch_empty_cache_steps: 2
 
 loss:

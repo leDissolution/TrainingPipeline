@@ -92,8 +92,8 @@ layerwise_lr:
 training:
   seed: 42
   dataset_seed: 1234
-  output_dir: "${WORK_BASE}/g2b-stage0"
-  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-stage0"
+  output_dir: "${WORK_BASE}/${MODEL_NAME}-stage0"
+  merge_output_dir: "${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0"
   #merge_output_dir: null
   effective_batch_size: 10
   gradient_accumulation_steps: 1

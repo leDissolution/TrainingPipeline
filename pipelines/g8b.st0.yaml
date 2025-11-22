@@ -51,7 +51,7 @@ stages:
 
   - name: publish_stage0_to_hf
     publish_to_hf:
-      model_id: LeDissolution/statsuite_stage0
+      model_id: LeDissolution/statsuite_8b_stage0
       from_dir: ${STAGE0_BEST}
 
   - name: shutdown
