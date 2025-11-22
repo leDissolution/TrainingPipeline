@@ -1,6 +1,6 @@
 environment: configs/environments/pod.yaml
 vars:
-  MODEL_NAME: "g2b"
+  MODEL_NAME: "g8b"
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
 
 stages:
@@ -37,8 +37,7 @@ stages:
     script:
       name: train.py
       args:
-        --config: #configs/granite2b/stage0/base.yaml
-          sweep: configs/granite2b/stage0/seeds
+          sweep: configs/granite8b/stage0/seeds
 
   - name: pick_best_stage0
     select_best:
