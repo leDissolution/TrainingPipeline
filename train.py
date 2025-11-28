@@ -648,6 +648,7 @@ def main() -> None:
     # SFT args
     train_cfg = cfg.get("training", {})
     dataset_seed = train_cfg.get("dataset_seed", None)
+    disable_shuffle = bool(train_cfg.get("disable_shuffle", False))
 
     # Infer precision from model dtype (avoid mismatch)
     bf16 = dtype == torch.bfloat16
@@ -831,6 +832,7 @@ def main() -> None:
         preprocess_logits_for_metrics=metric_calculator.keep_argmax,
         args=sft_args,
         dataset_seed=(int(dataset_seed) if dataset_seed is not None else None),
+        disable_shuffle=disable_shuffle,
     )
 
     if trainer_cls is ForkWeighedLossTrainer:

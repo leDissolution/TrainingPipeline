@@ -150,6 +150,7 @@ class LayerwiseLRTrainer(SFTTrainer):
         group_specs: Optional[Sequence[GroupSpec]] = None,
         base_lr: float = 1e-4,
         dataset_seed: Optional[int] = None,
+        disable_shuffle: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -157,6 +158,7 @@ class LayerwiseLRTrainer(SFTTrainer):
         self._specs: List[GroupSpec] = list(group_specs) if group_specs is not None else []
         # Optional separate RNG seed for dataset shuffling, independent of self.args.seed
         self._dataset_seed: Optional[int] = int(dataset_seed) if dataset_seed is not None else None
+        self._disable_shuffle = bool(disable_shuffle)
         self._dataset_generator: Optional[torch.Generator] = None
         if self._dataset_seed is not None:
             gen = torch.Generator()
@@ -199,6 +201,9 @@ class LayerwiseLRTrainer(SFTTrainer):
 
         if world_size is None or world_size <= 1:
             ds_sized = cast(Sized, self.train_dataset)
+            if self._disable_shuffle:
+                from torch.utils.data import SequentialSampler
+                return SequentialSampler(ds_sized)
             if self._dataset_generator is not None:
                 return RandomSampler(ds_sized, generator=self._dataset_generator)
             return RandomSampler(ds_sized)
@@ -209,7 +214,7 @@ class LayerwiseLRTrainer(SFTTrainer):
                 ds_any,
                 num_replicas=world_size,
                 rank=process_index,
-                shuffle=True,
+                shuffle=(not self._disable_shuffle),
                 seed=int(seed),
                 drop_last=False,
             )
@@ -312,9 +317,11 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         fork_alpha: float = 1.0,
         fork_mask_key: str = "fork_mask",
         ignore_index: int = -100,
+        disable_shuffle: bool = False,
         **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        # Pass disable_shuffle to parent LayerwiseLRTrainer
+        super().__init__(*args, disable_shuffle=disable_shuffle, **kwargs)
         self._fork_alpha = float(fork_alpha)
         self._fork_mask_key = str(fork_mask_key)
         self._ignore_index = int(ignore_index)

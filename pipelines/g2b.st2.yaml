@@ -36,8 +36,8 @@ stages:
       base_config: configs/granite2b/stage2/base.yaml
       name: seeds
       param_ranges:
-        training.dataset_seed: [42, 1234]
-        training.num_train_epochs: [1, 2]
+        training.seed: [42, 1234, 3407]
+        training.disable_shuffle: [true, false]
         loss.use_fork_weighed: [false]
         
   - name: stage2
