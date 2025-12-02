@@ -30,6 +30,7 @@ stages:
       venv: ../DatasetProcessor/.venv
       args:
         --base_path: "${DATASET}"
+        --existing_eval_file: "${DATASET}/Assembled/eval.jsonl"
 
   - name: stage2_make_sweeps
     make_sweeps:
@@ -37,7 +38,7 @@ stages:
       name: seeds
       param_ranges:
         training.seed: [42, 1234, 3407]
-        training.disable_shuffle: [true, false]
+        training.disable_shuffle: [true]
         loss.use_fork_weighed: [false]
         
   - name: stage2
