@@ -37,8 +37,7 @@ stages:
       name: seeds
       param_ranges:
         training.seed: [42, 1234, 3407]
-        training.disable_shuffle: [true]
-        loss.use_fork_weighed: [false]
+        training.lr_scheduler_kwargs.min_lr_rate: [0.5, 0.125]
         
   - name: stage2
     env_variables:

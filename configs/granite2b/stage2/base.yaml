@@ -66,8 +66,9 @@ training:
   eval_on_start: true
   per_device_eval_batch_size: 8
   torch_empty_cache_steps: 2
+  disable_shuffle: true
 
 loss:
-  use_fork_weighed: true
+  use_fork_weighed: false
   fork_mask_key: fork_mask
   fork_alpha: 1.0
