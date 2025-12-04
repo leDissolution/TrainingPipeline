@@ -39,6 +39,7 @@ stages:
       param_ranges:
         training.seed: [42, 1234, 3407]
         training.effective_batch_size: [16]
+        training.gradient_accumulation_steps: [4]
         
   - name: stage2
     env_variables:
