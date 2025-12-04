@@ -20,7 +20,7 @@ stages:
         --with_loss: true
         --with_chats: true
         --with_synthetic: true
-        --clean: true
+        --clean: false
         --model_name: "${STAGE1_BEST}"
         --devices: "0,1,2,3"
 
@@ -30,6 +30,7 @@ stages:
       venv: ../DatasetProcessor/.venv
       args:
         --base_path: "${DATASET}"
+        --existing_eval_file: "${DATASET}/Assembled/eval.jsonl"
 
   - name: stage2_make_sweeps
     make_sweeps:
@@ -37,7 +38,7 @@ stages:
       name: seeds
       param_ranges:
         training.seed: [42, 1234, 3407]
-        training.lr_scheduler_kwargs.min_lr_rate: [0.5, 0.125]
+        training.effective_batch_size: [16]
         
   - name: stage2
     env_variables:
