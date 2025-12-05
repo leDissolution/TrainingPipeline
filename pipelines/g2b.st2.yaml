@@ -31,6 +31,8 @@ stages:
       args:
         --base_path: "${DATASET}"
         --existing_eval_file: "${DATASET}/Assembled/eval.jsonl"
+        --batch_size: 24
+        --epochs: 2
 
   - name: stage2_make_sweeps
     make_sweeps:
@@ -38,8 +40,7 @@ stages:
       name: seeds
       param_ranges:
         training.seed: [42, 1234, 3407]
-        training.effective_batch_size: [16]
-        training.gradient_accumulation_steps: [4]
+        training.max_steps: [2000, 3000]
         
   - name: stage2
     env_variables:
