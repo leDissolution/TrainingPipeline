@@ -39,9 +39,11 @@ stages:
       base_config: configs/granite2b/stage2/base.yaml
       name: seeds
       param_ranges:
-        training.seed: [42, 1234, 3407]
+        training.dataset_seed: [42, 1234, 3407]
         training.max_steps: [3000]
         training.warmup_ratio: [0.03]
+        training.disable_shuffle: [false]
+        training.batch_shuffle: [true]
         
   - name: stage2
     env_variables:

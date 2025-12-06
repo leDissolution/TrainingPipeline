@@ -649,6 +649,19 @@ def main() -> None:
     train_cfg = cfg.get("training", {})
     dataset_seed = train_cfg.get("dataset_seed", None)
     disable_shuffle = bool(train_cfg.get("disable_shuffle", False))
+    batch_shuffle = bool(train_cfg.get("batch_shuffle", False))
+
+    # Infer an effective batch size for batch-level shuffling (falls back to derived value)
+    ga_steps = int(train_cfg.get("gradient_accumulation_steps", 1))
+    device_count_guess = torch.cuda.device_count() or 1
+    eff_bs_cfg = train_cfg.get("effective_batch_size", None)
+    if eff_bs_cfg is not None:
+        try:
+            effective_batch_size = max(1, int(eff_bs_cfg))
+        except Exception:
+            effective_batch_size = per_device_train_bs * ga_steps * max(1, device_count_guess)
+    else:
+        effective_batch_size = per_device_train_bs * ga_steps * max(1, device_count_guess)
 
     # Infer precision from model dtype (avoid mismatch)
     bf16 = dtype == torch.bfloat16
@@ -833,6 +846,8 @@ def main() -> None:
         args=sft_args,
         dataset_seed=(int(dataset_seed) if dataset_seed is not None else None),
         disable_shuffle=disable_shuffle,
+        batch_shuffle=batch_shuffle,
+        batch_shuffle_size=effective_batch_size,
     )
 
     if trainer_cls is ForkWeighedLossTrainer:

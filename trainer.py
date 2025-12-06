@@ -19,11 +19,12 @@ from typing import Iterable, List, Sequence, Tuple, Dict, Any, Optional, cast, S
 from dataclasses import dataclass
 import os
 import json
+import math
 
 import torch
 from trl import SFTTrainer
 import torch.nn.functional as F
-from torch.utils.data import RandomSampler, DistributedSampler, IterableDataset
+from torch.utils.data import RandomSampler, DistributedSampler, IterableDataset, SequentialSampler, Sampler
 
 # ---------------------------------------------------------------------------
 # Group specification (order matters; first match wins)
@@ -129,6 +130,82 @@ def build_param_groups_from_specs(
     return param_groups, disabled_counts
 
 
+# ---------------------------------------------------------------------------
+# Samplers that shuffle by batch-sized chunks (stable within each chunk)
+# ---------------------------------------------------------------------------
+
+class BatchShuffleSampler(Sampler[int]):
+    def __init__(self, data_source: Sized, batch_size: int, generator: Optional[torch.Generator] = None) -> None:
+        self.data_source = data_source
+        self.batch_size = max(1, int(batch_size))
+        self.generator = generator
+
+    def __iter__(self):
+        n = len(self.data_source)
+        if n <= 0:
+            return iter([])
+
+        bs = self.batch_size
+        num_chunks = math.ceil(n / bs)
+        gen = self.generator
+        if gen is not None:
+            chunk_order = torch.randperm(num_chunks, generator=gen).tolist()
+        else:
+            chunk_order = torch.randperm(num_chunks).tolist()
+
+        ordered: List[int] = []
+        for chunk in chunk_order:
+            start = chunk * bs
+            end = min(start + bs, n)
+            ordered.extend(range(start, end))
+        return iter(ordered)
+
+    def __len__(self) -> int:
+        return len(self.data_source)
+
+
+class BatchShuffleDistributedSampler(DistributedSampler):
+    def __init__(
+        self,
+        dataset,
+        batch_size: int,
+        shuffle: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__(dataset, shuffle=shuffle, **kwargs)
+        self.batch_size = max(1, int(batch_size))
+        self._shuffle_batches = bool(shuffle)
+
+    def __iter__(self):
+        bs = self.batch_size
+        total_size = self.total_size
+        num_chunks = math.ceil(total_size / bs)
+
+        if self._shuffle_batches:
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            chunk_order = torch.randperm(num_chunks, generator=g).tolist()
+        else:
+            chunk_order = list(range(num_chunks))
+
+        ds_len = len(cast(Sized, self.dataset))
+        indices = list(range(ds_len))
+        if not self.drop_last:
+            padding_size = self.total_size - len(indices)
+            if padding_size > 0:
+                indices += indices[:padding_size]
+        else:
+            indices = indices[: self.total_size]
+
+        ordered: List[int] = []
+        for chunk in chunk_order:
+            start = chunk * bs
+            end = min(start + bs, self.total_size)
+            ordered.extend(indices[start:end])
+
+        return iter(ordered[self.rank : self.total_size : self.num_replicas])
+
+
 class LayerwiseLRTrainer(SFTTrainer):
     """Generic trainer that accepts arbitrary group specifications.
 
@@ -151,6 +228,8 @@ class LayerwiseLRTrainer(SFTTrainer):
         base_lr: float = 1e-4,
         dataset_seed: Optional[int] = None,
         disable_shuffle: bool = False,
+        batch_shuffle: bool = False,
+        batch_shuffle_size: Optional[int] = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -164,6 +243,21 @@ class LayerwiseLRTrainer(SFTTrainer):
             gen = torch.Generator()
             gen.manual_seed(self._dataset_seed)
             self._dataset_generator = gen
+
+        self._batch_shuffle = bool(batch_shuffle)
+        self._batch_shuffle_size = self._resolve_batch_shuffle_size(batch_shuffle_size)
+
+    def _resolve_batch_shuffle_size(self, batch_shuffle_size: Optional[int]) -> int:
+        if batch_shuffle_size is not None:
+            try:
+                return max(1, int(batch_shuffle_size))
+            except Exception:
+                pass
+        bs = max(1, int(getattr(self.args, "per_device_train_batch_size", 1)))
+        ga = max(1, int(getattr(self.args, "gradient_accumulation_steps", 1)))
+        world = int(getattr(self.args, "world_size", 1) or 1)
+        world = world if world > 0 else 1
+        return max(1, bs * ga * world)
 
     def create_optimizer(self):  # type: ignore[override]
         if self.optimizer is None:
@@ -199,17 +293,30 @@ class LayerwiseLRTrainer(SFTTrainer):
         world_size = getattr(self.args, "world_size", 1)
         process_index = getattr(self.args, "process_index", 0)
 
+        batch_chunk = self._batch_shuffle_size
+
         if world_size is None or world_size <= 1:
             ds_sized = cast(Sized, self.train_dataset)
             if self._disable_shuffle:
-                from torch.utils.data import SequentialSampler
                 return SequentialSampler(ds_sized)
+            if self._batch_shuffle:
+                return BatchShuffleSampler(ds_sized, batch_size=batch_chunk, generator=self._dataset_generator)
             if self._dataset_generator is not None:
                 return RandomSampler(ds_sized, generator=self._dataset_generator)
             return RandomSampler(ds_sized)
         else:
             seed = self._dataset_seed if self._dataset_seed is not None else int(getattr(self.args, "seed", 0))
             ds_any = cast(Any, self.train_dataset)
+            if self._batch_shuffle and not self._disable_shuffle:
+                return BatchShuffleDistributedSampler(
+                    ds_any,
+                    batch_size=batch_chunk,
+                    num_replicas=world_size,
+                    rank=process_index,
+                    shuffle=True,
+                    seed=int(seed),
+                    drop_last=False,
+                )
             return DistributedSampler(
                 ds_any,
                 num_replicas=world_size,
@@ -318,10 +425,18 @@ class ForkWeighedLossTrainer(LayerwiseLRTrainer):
         fork_mask_key: str = "fork_mask",
         ignore_index: int = -100,
         disable_shuffle: bool = False,
+        batch_shuffle: bool = False,
+        batch_shuffle_size: Optional[int] = None,
         **kwargs,
     ) -> None:
         # Pass disable_shuffle to parent LayerwiseLRTrainer
-        super().__init__(*args, disable_shuffle=disable_shuffle, **kwargs)
+        super().__init__(
+            *args,
+            disable_shuffle=disable_shuffle,
+            batch_shuffle=batch_shuffle,
+            batch_shuffle_size=batch_shuffle_size,
+            **kwargs,
+        )
         self._fork_alpha = float(fork_alpha)
         self._fork_mask_key = str(fork_mask_key)
         self._ignore_index = int(ignore_index)
