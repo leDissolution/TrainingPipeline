@@ -117,7 +117,7 @@ gradient_logging:
   enabled: true
 
 loss:
-  use_fork_weighed: true
+  use_fork_weighed: false
   fork_mask_key: fork_mask
   fork_alpha: 1.0
   mask_generator:
