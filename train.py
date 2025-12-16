@@ -404,6 +404,9 @@ def main() -> None:
     # Model load params
     model_cfg = cfg.get("model", {})
     dtype = _dtype_from_str(str(model_cfg.get("dtype", "bfloat16")))
+    # Optional override for Hugging Face download/cache location
+    cache_dir_val = model_cfg.get("local_dir") or model_cfg.get("cache_dir")
+    cache_dir = str(cache_dir_val).strip() if cache_dir_val else None
 
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(model_cfg.get("model_name")),
@@ -411,7 +414,8 @@ def main() -> None:
         load_in_4bit=bool(model_cfg.get("load_in_4bit", False)),
         load_in_8bit=bool(model_cfg.get("load_in_8bit", False)),
         dtype=dtype,
-        attn_implementation=str(model_cfg.get("attn_implementation", "eager")),
+        #attn_implementation=str(model_cfg.get("attn_implementation", "eager")),
+        cache_dir=cache_dir,
     )
 
     # Dataset build

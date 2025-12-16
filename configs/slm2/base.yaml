@@ -7,6 +7,7 @@ model:
   load_in_4bit: false
   load_in_8bit: false
   max_seq_length: 4096
+  local_dir: null  # optional Hugging Face download/cache directory
 
 peft:
   r: 100
