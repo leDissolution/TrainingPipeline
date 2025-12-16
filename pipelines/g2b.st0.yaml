@@ -34,9 +34,8 @@ stages:
       name: seeds
       param_ranges:
         #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.dataset_seed: [42, 1234, 3407]
-        training.disable_shuffle: [false]
-        training.batch_shuffle: [true]
+        peft.random_state: [42, 1234, 3407]
+        training.disable_shuffle: [true]
 
   - name: stage0
     env_variables:
