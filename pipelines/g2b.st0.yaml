@@ -16,6 +16,18 @@ stages:
         --with_synthetic: true
         --clean: true
 
+  - name: assemble_dataset
+    script:
+      name: ../DatasetProcessor/assemble_stage0.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET}"
+        --output_dir: "${DATASET}/Assembled_0"
+        --batch_size: 10
+        --seed: 42
+        --max_per_attr: 10
+        --epochs: 3
+
   - name: stage0_make_sweeps
     make_sweeps:
       base_config: configs/granite2b/stage0/base.yaml
@@ -23,9 +35,8 @@ stages:
       param_ranges:
         #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
         training.dataset_seed: [42, 1234, 3407]
-        tokens.grad_boost.factor: [5.0, 15.0]
-        tokens.target: ["new", "all"]
-
+        training.disable_shuffle: [false]
+        training.batch_shuffle: [true]
 
   - name: stage0
     env_variables:

@@ -1,19 +1,10 @@
 extends: ../base.yaml
 
 dataset:
-  base_path: "${DATASET}/Synthetic"
-  stats:
-    - location
-    - pose
-    - outfit
-    - accessories
-    - bodyState
-    - fixtures
-    - items
-    - noop
-    - pose-location
-    - mood
-    - passages
+  train_files:
+  - "${DATASET}/Assembled_0/train.jsonl"
+  eval_files:
+  - "${DATASET}/Assembled_0/eval.jsonl"
 
 model:
   model_name: "ibm-granite/granite-3.1-2b-base"
@@ -104,7 +95,7 @@ training:
   weight_decay: 0.001
   adam_beta1: 0.9
   adam_beta2: 0.999
-  num_train_epochs: 3
+  num_train_epochs: 1
   max_grad_norm: 1.0
   logging_steps: 1
   save_strategy: epoch
@@ -114,7 +105,7 @@ training:
   eval_on_start: true
 
 gradient_logging:
-  enabled: true
+  enabled: false
 
 loss:
   use_fork_weighed: false
