@@ -22,9 +22,10 @@ stages:
       name: seeds
       param_ranges:
         #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000]
-        training.num_train_epochs: [3]
-        training.adam_beta2: [0.995, 0.999]
+        training.dataset_seed: [42, 1234, 3407]
+        tokens.grad_boost.factor: [5.0, 15.0]
+        tokens.target: ["new", "all"]
+
 
   - name: stage0
     env_variables:

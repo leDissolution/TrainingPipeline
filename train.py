@@ -1027,7 +1027,7 @@ def main() -> None:
         # Merge once, then move to CPU and set dtype
         merged_model = model.merge_and_unload()
         try:
-            merged_model = merged_model.to("cpu", dtype=torch.float16)
+            merged_model = merged_model.to("cpu", dtype=dtype)
         except Exception:
             try:
                 merged_model = merged_model.to("cpu")
