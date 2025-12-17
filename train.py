@@ -413,6 +413,10 @@ def main() -> None:
     cache_dir_val = model_cfg.get("local_dir") or model_cfg.get("cache_dir")
     cache_dir = str(cache_dir_val).strip() if cache_dir_val else None
 
+    peft_cfg = cfg.get("peft", {})
+    r_val = peft_cfg.get("r", 8)
+    r_is_full = isinstance(r_val, str) and r_val.strip().lower() == "full"
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(model_cfg.get("model_name")),
         max_seq_length=int(model_cfg.get("max_seq_length", 2048)),
@@ -421,6 +425,7 @@ def main() -> None:
         dtype=dtype,
         #attn_implementation=str(model_cfg.get("attn_implementation", "eager")),
         cache_dir=cache_dir,
+        full_finetuning=r_is_full,
     )
 
     # Dataset build
@@ -563,11 +568,7 @@ def main() -> None:
     metric_calculator = MetricCalculator(tokenizer, expected_values=expected_values, target_attrs=target_attrs, example_ids=eval_ids)
 
     # PEFT / LoRA
-    peft_cfg = cfg.get("peft", {})
     target_modules = resolve_target_modules(cfg)
-
-    r_val = peft_cfg.get("r", 8)
-    r_is_full = isinstance(r_val, str) and r_val.strip().lower() == "full"
 
     if r_is_full:
         # Full fine-tune: freeze everything, then enable target_modules just like LoRA selection
