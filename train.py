@@ -417,6 +417,8 @@ def main() -> None:
     r_val = peft_cfg.get("r", 8)
     r_is_full = isinstance(r_val, str) and r_val.strip().lower() == "full"
 
+    print("Full finetuning mode:", r_is_full)
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(model_cfg.get("model_name")),
         max_seq_length=int(model_cfg.get("max_seq_length", 2048)),
