@@ -218,7 +218,12 @@ def add_and_initialize_tokens(
                     if len(seed_ids) == 0:
                         vec = fallback_vec
                     else:
-                        vec = emb_weight[seed_ids].mean(dim=0)
+                        source_vecs = emb_weight[seed_ids] 
+                        mean_vec = source_vecs.mean(dim=0)
+                        avg_norm = source_vecs.norm(p=2, dim=1).mean()
+                        current_norm = mean_vec.norm(p=2)
+                        vec = mean_vec * (avg_norm / (current_norm + 1e-8))
+                        
                     emb_weight[tok_id].copy_(vec)
 
     # Build list of all tokens referenced (existing or new), deduped
@@ -561,23 +566,45 @@ def main() -> None:
     peft_cfg = cfg.get("peft", {})
     target_modules = resolve_target_modules(cfg)
 
-    rank = int(peft_cfg.get("r", 8))
-    alpha = peft_cfg.get("lora_alpha", 8)
-    if (alpha == "rank"):
-        alpha = rank
-    else:
-        alpha = int(alpha)
+    r_val = peft_cfg.get("r", 8)
+    r_is_full = isinstance(r_val, str) and r_val.strip().lower() == "full"
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=rank,
-        lora_alpha=alpha,
-        target_modules=target_modules,
-        lora_dropout=float(peft_cfg.get("lora_dropout", 0.0)),  # type: ignore[arg-type]
-        use_gradient_checkpointing=peft_cfg.get("use_gradient_checkpointing", "unsloth"),  # type: ignore[arg-type]
-        random_state=int(peft_cfg.get("random_state", 3407)),
-        modules_to_save=[str(m) for m in peft_cfg.get("modules_to_save", [])],
-    )
+    if r_is_full:
+        # Full fine-tune: freeze everything, then enable target_modules just like LoRA selection
+        for _, param in model.named_parameters():
+            param.requires_grad_(False)
+
+        enabled = 0
+        for name, param in model.named_parameters():
+            if any(t in name for t in target_modules):
+                param.requires_grad_(True)
+                enabled += 1
+
+        # If no matches, fall back to fully trainable to avoid accidental full freeze
+        if enabled == 0:
+            for _, param in model.named_parameters():
+                param.requires_grad_(True)
+            print("[PEFT] r=full requested but no target_modules matched; leaving all parameters trainable.")
+        else:
+            print(f"[PEFT] r=full -> enabled {enabled} parameter tensors; others frozen.")
+    else:
+        rank = int(r_val)
+        alpha = peft_cfg.get("lora_alpha", 8)
+        if (alpha == "rank"):
+            alpha = rank
+        else:
+            alpha = int(alpha)
+
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=rank,
+            lora_alpha=alpha,
+            target_modules=target_modules,
+            lora_dropout=float(peft_cfg.get("lora_dropout", 0.0)),  # type: ignore[arg-type]
+            use_gradient_checkpointing=peft_cfg.get("use_gradient_checkpointing", "unsloth"),  # type: ignore[arg-type]
+            random_state=int(peft_cfg.get("random_state", 3407)),
+            modules_to_save=[str(m) for m in peft_cfg.get("modules_to_save", [])],
+        )
 
     if peft_cfg.get("force_requires_grad_on_embeddings", True):
         try:
