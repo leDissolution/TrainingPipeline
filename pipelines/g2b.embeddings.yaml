@@ -28,7 +28,7 @@ stages:
         --max_per_attr: 10
         --epochs: 1
 
-  - name: stage0_make_sweeps
+  - name: embeddings_make_sweeps
     make_sweeps:
       base_config: configs/granite2b/embeddings/base.yaml
       name: seeds
@@ -37,7 +37,7 @@ stages:
         peft.random_state: [42, 1234, 3407]
         training.disable_shuffle: [true]
 
-  - name: stage0
+  - name: embeddings
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
         value: 0

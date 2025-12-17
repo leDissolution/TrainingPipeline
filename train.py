@@ -797,17 +797,24 @@ def main() -> None:
         trainer_args_dict = {str(k): _json_safe(v) for k, v in dict(trainer_args_dict).items()}
 
         # LoRA/PEFT details
-        lora_info: Dict[str, Any] = {
-            "r": rank,
-            "lora_alpha": alpha,
-            "lora_dropout": float(peft_cfg.get("lora_dropout", 0.0)),
-            "use_gradient_checkpointing": _json_safe(peft_cfg.get("use_gradient_checkpointing", "unsloth")),
-            "random_state": int(peft_cfg.get("random_state", 3407)),
-            "modules_to_save": [str(m) for m in peft_cfg.get("modules_to_save", [])],
-            "target_modules": list(target_modules),
-            "force_requires_grad_on_embeddings": bool(peft_cfg.get("force_requires_grad_on_embeddings", True)),
-            "dtype": str(model_cfg.get("dtype", "bfloat16")),
-        }
+        lora_info: Dict[str, Any]
+        if r_is_full:
+            lora_info = {
+                "r": "full",
+                "target_modules": list(target_modules),
+            }
+        else:
+            lora_info: Dict[str, Any] = {
+                "r": rank,
+                "lora_alpha": alpha,
+                "lora_dropout": float(peft_cfg.get("lora_dropout", 0.0)),
+                "use_gradient_checkpointing": _json_safe(peft_cfg.get("use_gradient_checkpointing", "unsloth")),
+                "random_state": int(peft_cfg.get("random_state", 3407)),
+                "modules_to_save": [str(m) for m in peft_cfg.get("modules_to_save", [])],
+                "target_modules": list(target_modules),
+                "force_requires_grad_on_embeddings": bool(peft_cfg.get("force_requires_grad_on_embeddings", True)),
+                "dtype": str(model_cfg.get("dtype", "bfloat16")),
+            }
 
         # Layerwise LR details
         layerwise_dump = {
@@ -1056,26 +1063,33 @@ def main() -> None:
         merge_dir = os.path.join(merge_dir, swipe_name)
 
     if merge_dir:
-        print("Finished training, merging model...")
         os.makedirs(merge_dir, exist_ok=True)
-        # Merge once, then move to CPU and set dtype
-        merged_model = model.merge_and_unload()
-        try:
-            merged_model = merged_model.to("cpu", dtype=dtype)
-        except Exception:
+
+        if r_is_full:
+            # Full FT: no merge needed; just save the full model
+            print("Finished training, saving full model without merge...")
+            model.save_pretrained(merge_dir, max_shard_size="3GB")
+            tokenizer.save_pretrained(merge_dir)
+        else:
+            print("Finished training, merging model...")
+            # Merge once, then move to CPU and set dtype
+            merged_model = model.merge_and_unload()
             try:
-                merged_model = merged_model.to("cpu")
+                merged_model = merged_model.to("cpu", dtype=dtype)
+            except Exception:
+                try:
+                    merged_model = merged_model.to("cpu")
+                except Exception:
+                    pass
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
             except Exception:
                 pass
-        gc.collect()
-        try:
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
-        merged_model.save_pretrained(merge_dir, max_shard_size="3GB")
-        tokenizer.save_pretrained(merge_dir)
+            merged_model.save_pretrained(merge_dir, max_shard_size="3GB")
+            tokenizer.save_pretrained(merge_dir)
 
-        # Persist last eval metrics alongside the merged model
+        # Persist last eval metrics alongside the saved model
         try:
             metrics_path = os.path.join(merge_dir, "last_eval_metrics.json")
             payload: Dict[str, Any] = {}
@@ -1092,26 +1106,25 @@ def main() -> None:
         except Exception as e:
             print(f"[Warning] Could not write last eval metrics JSON: {e}")
 
-        print("Model merged and saved.")
-
-        # Cleanup: remove optimizer.pt files from checkpoints to save space
-        try:
-            checkpoint_root = output_dir
-            removed = 0
-            if os.path.isdir(checkpoint_root):
-                for root, dirs, files in os.walk(checkpoint_root):
-                    # Only act on HF Trainer checkpoint folders
-                    if os.path.basename(root).startswith("checkpoint"):
-                        opt_path = os.path.join(root, "optimizer.pt")
-                        if os.path.isfile(opt_path):
-                            try:
-                                os.remove(opt_path)
-                                removed += 1
-                            except Exception as e:
-                                print(f"[Cleanup] Failed to remove {opt_path}: {e}")
-            print(f"[Cleanup] Removed optimizer.pt from {removed} checkpoint(s) under '{checkpoint_root}'.")
-        except Exception as e:
-            print(f"[Cleanup] Skipped optimizer cleanup due to error: {e}")
+        if not r_is_full:
+            # Cleanup: remove optimizer.pt files from checkpoints to save space
+            try:
+                checkpoint_root = output_dir
+                removed = 0
+                if os.path.isdir(checkpoint_root):
+                    for root, dirs, files in os.walk(checkpoint_root):
+                        # Only act on HF Trainer checkpoint folders
+                        if os.path.basename(root).startswith("checkpoint"):
+                            opt_path = os.path.join(root, "optimizer.pt")
+                            if os.path.isfile(opt_path):
+                                try:
+                                    os.remove(opt_path)
+                                    removed += 1
+                                except Exception as e:
+                                    print(f"[Cleanup] Failed to remove {opt_path}: {e}")
+                print(f"[Cleanup] Removed optimizer.pt from {removed} checkpoint(s) under '{checkpoint_root}'.")
+            except Exception as e:
+                print(f"[Cleanup] Skipped optimizer cleanup due to error: {e}")
     else:
         # Explicitly confirm that merging was skipped when merge_output_dir is null/empty.
         print("[Merge] Skipped: training.training.merge_output_dir is null/empty.")

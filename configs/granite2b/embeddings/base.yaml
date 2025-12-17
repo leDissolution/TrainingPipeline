@@ -12,16 +12,36 @@ model:
 tokens:
   pad_to_eos: true
   add_and_init:
-    - { token: "!!no_change!!",    init: "sameSamecopyCopycloneCloneidentical" }
+    - { token: "!!no_change!!",    init: "samecopyidentical" }
+
+    #formatting tokens
     - { token: "message",          init: "messagenew" }
     - { token: "previousMessage",  init: "messageold" }
     - { token: "stats",            init: "stats" }
+    - { token: "character",        init: "character" }
+    - { token: "scene",            init: "scene" }
+    
+    #clarity tokens
     - { token: "unspecified",      init: "undefined" }
     - { token: "nude",             init: "bare" }
     - { token: "genitalia",        init: "sexgender" }
-    - { token: " genitalia",        init: " sex gender" }
+    - { token: " genitalia",       init: " sex gender" }
+
+    #stats
+    #character: pose, location, outfit, accessories, exposure, bodyState, mood
+    - { token: " pose",             init: " pose hold" }
+    - { token: " location",         init: " location position" }
+    - { token: " outfit",           init: " gear look cover" }
+    - { token: " accessories",      init: " ring watch" }
+    - { token: " bodyState",        init: " health state" }
+    - { token: " mood",             init: " mood emotion" }
+    - { token: " exposure",         init: " skin visible" }
+
+    #scene: fixtures, items, passages
     - { token: " passages",         init: "doorwindowgate" }
     - { token: " fixtures",         init: "fixturescouchtablebedfloor" }
+    - { token: " items",            init: "itemsthingstoolsobjects" }
+
   grad_boost:
     factor: 10.0
     target: all            # new | all
