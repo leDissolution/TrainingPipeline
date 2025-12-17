@@ -2,7 +2,7 @@ extends: ../base.yaml
 
 dataset:
   train_files:
-  - "${DATASET}/Assembled_0/train.jsonl"
+  - "${DATASET}/embeddings.train.jsonl"
   eval_files:
   - "${DATASET}/Assembled_0/eval.jsonl"
 
@@ -11,6 +11,11 @@ model:
 
 tokens:
   pad_to_eos: true
+  train_only_listed: true
+  train_only_apply_to:
+    - input
+    - output
+  train_only_weight_decay: 0
   add_and_init:
     - { token: "!!no_change!!",    init: "samecopyidentical" }
 
@@ -33,7 +38,7 @@ tokens:
     - { token: " location",         init: " location position" }
     - { token: " outfit",           init: " gear look cover" }
     - { token: " accessories",      init: " ring watch" }
-    - { token: " bodyState",        init: " health state" }
+    - { token: " bodystate",        init: " health state" }
     - { token: " mood",             init: " mood emotion" }
     - { token: " exposure",         init: " skin visible" }
 
@@ -43,7 +48,7 @@ tokens:
     - { token: " items",            init: "itemsthingstoolsobjects" }
 
   grad_boost:
-    factor: 10.0
+    factor: 1.0
     target: all            # new | all
     apply_to: ["input", "output"]
 
@@ -54,7 +59,7 @@ peft:
     - lm_head
 
 layerwise_lr:
-  base_lr: 5.0e-6
+  base_lr: 5.0e-5
 
 training:
   seed: 42
@@ -66,7 +71,7 @@ training:
   gradient_accumulation_steps: 1
   warmup_ratio: 0.05
   lr_scheduler_type: constant
-  weight_decay: 0.0001
+  weight_decay: 0
   adam_beta1: 0.9
   adam_beta2: 0.999
   num_train_epochs: 1
@@ -80,3 +85,9 @@ training:
 
 gradient_logging:
   enabled: false
+
+collator:
+  mode: prompt_span_masking
+  start_mask: '**/'
+  end_mask: '/**'
+  drop_mask_tokens: true

@@ -268,34 +268,110 @@ class DataCollatorForLastCompletionOnlyLM(DataCollatorForLanguageModeling):
 
         return batch
 
-class DataCollatorLastCompWithHeadDropout(DataCollatorForLastCompletionOnlyLM):
+
+class DataCollatorPromptSpanMasking(DataCollatorForLanguageModeling):
     def __init__(
         self,
-        response_template: Union[str, List[int]],
-        num_attention_heads: int,
-        head_dropout_p: float = 0.1,
+        start_mask: Union[str, List[int]],
+        end_mask: Union[str, List[int]],
         *args,
         mlm: bool = False,
         ignore_index: int = -100,
-        **kwargs
-    ):
-        super().__init__(response_template, *args, mlm=mlm, ignore_index=ignore_index, **kwargs)
-        self.num_heads = num_attention_heads
-        self.head_p    = head_dropout_p
-
-    def torch_call(self, examples: List[Dict[str, Any]]) -> Dict[str, Any]:
-        batch = super().torch_call(examples)
-        attn2d = batch["attention_mask"]        # shape (B, S)
-        bsz, seq_len = attn2d.shape
-
-        mask4d = attn2d[:, None, None, :].float()
-
-        keep = torch.bernoulli(
-            torch.full((bsz, self.num_heads, 1, 1),
-                       1.0 - self.head_p,
-                       device=mask4d.device)
+        drop_mask_tokens: bool = True,
+        mask_markers_in_loss: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, mlm=mlm, **kwargs)
+        self.start_mask_ids = (
+            self.tokenizer.encode(start_mask, add_special_tokens=False)
+            if isinstance(start_mask, str)
+            else [int(x) for x in start_mask]
         )
+        self.end_mask_ids = (
+            self.tokenizer.encode(end_mask, add_special_tokens=False)
+            if isinstance(end_mask, str)
+            else [int(x) for x in end_mask]
+        )
+        self.ignore_index = ignore_index
+        self.drop_mask_tokens = bool(drop_mask_tokens)
+        self.mask_markers_in_loss = bool(mask_markers_in_loss)
 
-        batch["attention_mask"] = mask4d * keep
+    @staticmethod
+    def _find_subseq(seq: List[int], pat: List[int], start: int = 0) -> int:
+        if not pat:
+            return -1
+        max_idx = len(seq) - len(pat) + 1
+        for idx in range(start, max_idx):
+            if seq[idx : idx + len(pat)] == pat:
+                return idx
+        return -1
 
+    def torch_call(self, examples: List[Any]) -> Dict[str, Any]:
+        # Keep only tensorizable keys before padding
+        clean_examples = examples
+        try:
+            if isinstance(examples[0], dict):
+                allowed = {"input_ids", "labels", "attention_mask", "special_tokens_mask", "token_type_ids", "position_ids"}
+                tmp: List[Any] = []
+                for ex in examples:
+                    if not isinstance(ex, dict):
+                        tmp.append(ex)
+                        continue
+                    kept: Dict[str, Any] = {}
+                    for k, v in ex.items():
+                        if k in allowed:
+                            kept[k] = v
+                    tmp.append(kept)
+                clean_examples = tmp
+        except Exception:
+            clean_examples = examples
+
+        batch = super().torch_call(clean_examples)
+        input_ids = batch["input_ids"]
+        labels = batch["labels"]
+        attn_mask = batch["attention_mask"]
+
+        pad_id = self.tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = self.tokenizer.eos_token_id or 0
+
+        start_ids = self.start_mask_ids
+        end_ids = self.end_mask_ids
+        s_len = len(start_ids)
+        e_len = len(end_ids)
+
+        B, S = input_ids.shape
+        for i in range(B):
+            seq = input_ids[i].tolist()
+            lab = labels[i]
+            attn = attn_mask[i]
+            cursor = 0
+            while True:
+                s_idx = self._find_subseq(seq, start_ids, cursor)
+                if s_idx < 0:
+                    break
+                e_idx = self._find_subseq(seq, end_ids, s_idx + s_len)
+                if e_idx < 0:
+                    break
+
+                content_start = s_idx + s_len
+                content_end = e_idx
+                if content_start < content_end:
+                    lab[content_start:content_end] = self.ignore_index
+
+                if self.mask_markers_in_loss:
+                    lab[s_idx : s_idx + s_len] = self.ignore_index
+                    lab[e_idx : e_idx + e_len] = self.ignore_index
+
+                if self.drop_mask_tokens:
+                    input_ids[i, s_idx : s_idx + s_len] = pad_id
+                    input_ids[i, e_idx : e_idx + e_len] = pad_id
+                    attn[s_idx : s_idx + s_len] = 0
+                    attn[e_idx : e_idx + e_len] = 0
+
+                cursor = e_idx + e_len
+
+        batch["labels"] = labels
+        batch["attention_mask"] = attn_mask
+        batch["input_ids"] = input_ids
         return batch

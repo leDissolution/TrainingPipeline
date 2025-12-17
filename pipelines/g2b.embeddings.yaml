@@ -28,14 +28,22 @@ stages:
         --max_per_attr: 10
         --epochs: 1
 
+  - name: assemble_tokens
+    script:
+      name: ../DatasetProcessor/assemble_embeddings.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --output_dir: "${DATASET}"
+
   - name: embeddings_make_sweeps
     make_sweeps:
       base_config: configs/granite2b/embeddings/base.yaml
       name: seeds
       param_ranges:
         #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        peft.random_state: [42, 1234, 3407]
-        training.disable_shuffle: [true]
+        training.effective_batch_size: [6, 12]
+        training.epochs: [3]
 
   - name: embeddings
     env_variables:

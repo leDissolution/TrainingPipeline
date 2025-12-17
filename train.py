@@ -13,7 +13,7 @@ from unsloth import FastLanguageModel
 from trl import SFTConfig
 
 # Local imports (mirror existing scripts)
-from data_collators import DataCollatorForLastCompletionOnlyLM
+from data_collators import DataCollatorForLastCompletionOnlyLM, DataCollatorPromptSpanMasking
 from callbacks import MetricCalculator, PerExampleEvalLogger, GradTensorBoardLogger, LogSamplerOrder
 from trainer import (
     GroupSpec,
@@ -236,6 +236,30 @@ def add_and_initialize_tokens(
     return new_token_ids, all_token_ids
 
 
+def _make_token_grad_hook(token_ids: List[int], factor: float):
+    """Factory for gradient hooks that scale specific token rows.
+    
+    Caches the token IDs tensor per-device and clones gradients to avoid
+    in-place modification issues with gradient accumulation.
+    """
+    ids_cache: Dict[torch.device, torch.Tensor] = {}
+
+    def hook(grad: torch.Tensor) -> Optional[torch.Tensor]:
+        if grad is None or grad.numel() == 0:
+            return grad
+        # Cache ids tensor per device
+        if grad.device not in ids_cache:
+            ids_cache[grad.device] = torch.tensor(token_ids, device=grad.device, dtype=torch.long)
+        ids_tensor = ids_cache[grad.device]
+        # Clone to avoid in-place modification affecting accumulation or tied weights
+        new_grad = grad.clone()
+        scaled = new_grad.index_select(0, ids_tensor) * factor
+        new_grad.index_copy_(0, ids_tensor, scaled)
+        return new_grad
+
+    return hook
+
+
 def register_token_grad_boost(
     model: torch.nn.Module,
     token_ids: List[int],
@@ -255,15 +279,7 @@ def register_token_grad_boost(
             emb_weight = emb_mod.weight if emb_mod is not None and hasattr(emb_mod, "weight") else None  # type: ignore[assignment]
             if emb_weight is None:
                 raise RuntimeError("No input embedding weight found")
-            def scale_rows(grad: torch.Tensor):
-                if grad is None or grad.numel() == 0:
-                    return grad
-                ids_tensor = torch.tensor(token_ids, device=grad.device, dtype=torch.long)
-                scaled = grad.index_select(0, ids_tensor) * factor
-                grad.index_copy_(0, ids_tensor, scaled)
-                return grad
-
-            emb_weight.register_hook(scale_rows)
+            emb_weight.register_hook(_make_token_grad_hook(token_ids, factor))
         except Exception:
             pass
 
@@ -286,17 +302,70 @@ def register_token_grad_boost(
             if isinstance(lm_w, torch.Tensor):
                 # Only apply if not weight-tied
                 if not (isinstance(in_emb_weight, torch.Tensor) and lm_w.data_ptr() == in_emb_weight.data_ptr()):
-                    def scale_rows_lm(grad: torch.Tensor):
-                        if grad is None or grad.numel() == 0:
-                            return grad
-                        ids_tensor = torch.tensor(token_ids, device=grad.device, dtype=torch.long)
-                        scaled = grad.index_select(0, ids_tensor) * factor
-                        grad.index_copy_(0, ids_tensor, scaled)
-                        return grad
-
-                    lm_w.register_hook(scale_rows_lm)
+                    lm_w.register_hook(_make_token_grad_hook(token_ids, factor))
         except Exception:
             pass
+
+
+def _make_token_keep_only_hook(token_ids: List[int]):
+    """Factory for gradient hooks that zero-out rows not in token_ids."""
+    uniq_ids = [int(t) for t in token_ids if isinstance(t, (int, float))]
+    uniq_ids = [t for i, t in enumerate(uniq_ids) if t not in uniq_ids[:i]]
+    mask_cache: Dict[Tuple[torch.device, int], torch.Tensor] = {}
+
+    def hook(grad: torch.Tensor) -> Optional[torch.Tensor]:
+        if grad is None or grad.numel() == 0:
+            return grad
+        dev = grad.device
+        vocab = grad.size(0)
+        key = (dev, vocab)
+        if key not in mask_cache:
+            valid_ids = [t for t in uniq_ids if 0 <= t < vocab]
+            if not valid_ids:
+                return torch.zeros_like(grad)
+            mask = torch.zeros(vocab, device=dev, dtype=grad.dtype)
+            mask.scatter_(0, torch.tensor(valid_ids, device=dev, dtype=torch.long), 1.0)
+            # Broadcast to any trailing dimensions (e.g., 2D or 3D grads)
+            mask_cache[key] = mask.view(-1, *([1] * (grad.dim() - 1)))
+        mask = mask_cache[key]
+        return grad * mask
+
+    return hook
+
+
+def register_token_grad_mask(
+    model: torch.nn.Module,
+    token_ids: List[int],
+    apply_to_input: bool = True,
+    apply_to_output: bool = True,
+) -> None:
+    """Register hooks so only listed token rows get non-zero gradients."""
+    if not token_ids:
+        return
+
+    hook = _make_token_keep_only_hook(token_ids)
+
+    in_emb_weight = None
+    try:
+        emb_mod = model.get_input_embeddings()  # type: ignore[attr-defined]
+        in_emb_weight = getattr(emb_mod, "weight", None)
+    except Exception:
+        in_emb_weight = None
+
+    out_weight = None
+    try:
+        out_mod = model.get_output_embeddings()  # type: ignore[attr-defined]
+        out_weight = getattr(out_mod, "weight", None)
+    except Exception:
+        out_weight = getattr(getattr(model, "lm_head", None), "weight", None)
+
+    if apply_to_input and isinstance(in_emb_weight, torch.Tensor):
+        in_emb_weight.register_hook(hook)
+
+    if apply_to_output and isinstance(out_weight, torch.Tensor):
+        # Avoid double-hook when weights are tied
+        if not (isinstance(in_emb_weight, torch.Tensor) and out_weight.data_ptr() == in_emb_weight.data_ptr()):
+            out_weight.register_hook(hook)
 
 
 # ------------------------------
@@ -498,16 +567,35 @@ def main() -> None:
     #     pass
 
     # Collator
-    coll_cfg = cfg.get("collator", {})
-    completion_marker = str(coll_cfg.get("completion_start_marker", '="'))
+    coll_cfg = cfg.get("collator", {}) or {}
+    coll_mode = str(coll_cfg.get("mode", "last_completion_only")).lower()
     loss_cfg_for_coll = cfg.get("loss", {}) or {}
-    collator = DataCollatorForLastCompletionOnlyLM(
-        completion_marker,
-        tokenizer=tokenizer,
-        fork_mask_key=str(loss_cfg_for_coll.get("fork_mask_key", "fork_mask")) if bool(loss_cfg_for_coll.get("use_fork_weighed", loss_cfg_for_coll.get("fork_weighed_enabled", False))) else None,
-        auto_full_mask=bool(loss_cfg_for_coll.get("force_full_mask", False)),
-        mask_generator=loss_cfg_for_coll.get("mask_generator", None),
-    )
+    ignore_index_for_coll = int(loss_cfg_for_coll.get("ignore_index", -100))
+    fork_mask_key = str(loss_cfg_for_coll.get("fork_mask_key", "fork_mask")) if bool(loss_cfg_for_coll.get("use_fork_weighed", loss_cfg_for_coll.get("fork_weighed_enabled", False))) else None
+
+    if coll_mode in ("last_completion_only", "last_completion"):
+        completion_marker = str(coll_cfg.get("completion_start_marker", '="'))
+        collator = DataCollatorForLastCompletionOnlyLM(
+            completion_marker,
+            tokenizer=tokenizer,
+            ignore_index=ignore_index_for_coll,
+            fork_mask_key=fork_mask_key,
+            auto_full_mask=bool(loss_cfg_for_coll.get("force_full_mask", False)),
+            mask_generator=loss_cfg_for_coll.get("mask_generator", None),
+        )
+    elif coll_mode in ("prompt_span_masking", "prompt_span"):
+        start_mask = coll_cfg.get("start_mask", "<mask>")
+        end_mask = coll_cfg.get("end_mask", "</mask>")
+        collator = DataCollatorPromptSpanMasking(
+            start_mask=start_mask,
+            end_mask=end_mask,
+            tokenizer=tokenizer,
+            ignore_index=ignore_index_for_coll,
+            drop_mask_tokens=bool(coll_cfg.get("drop_mask_tokens", True)),
+            mask_markers_in_loss=bool(coll_cfg.get("mask_markers_in_loss", True)),
+        )
+    else:
+        raise ValueError(f"Unknown collator.mode={coll_mode}")
 
     # Optional: token additions and gradient boosts
     tokens_cfg = cfg.get("tokens", {}) or {}
@@ -633,6 +721,23 @@ def main() -> None:
             )
             print(f"[Tokens] Registered grad boost on {len(ids)} token(s); factor={factor}; input={apply_to_input}, output={apply_to_output}")
 
+    # Optionally keep gradients only for the listed tokens (input/output embeddings)
+    train_only_listed = bool(tokens_cfg.get("train_only_listed", False))
+    train_only_apply_to = tokens_cfg.get("train_only_apply_to", ["input", "output"]) or []
+    mask_input = "input" in train_only_apply_to
+    mask_output = "output" in train_only_apply_to
+    if train_only_listed:
+        if all_token_ids:
+            register_token_grad_mask(
+                model,
+                all_token_ids,
+                apply_to_input=mask_input,
+                apply_to_output=mask_output,
+            )
+            print(f"[Tokens] train_only_listed enabled; masking gradients to {len(all_token_ids)} token(s); input={mask_input}, output={mask_output}")
+        else:
+            print("[Tokens] train_only_listed enabled but no token ids resolved; skipping mask")
+
     # Layerwise groups for optimizer
     lwise = cfg.get("layerwise_lr", {})
     base_lr = float(lwise.get("base_lr", 3e-5))
@@ -649,6 +754,20 @@ def main() -> None:
             weight_rescale=float(grp["weight_rescale"]) if "weight_rescale" in grp else None,
         )
         group_specs.append(gs)
+
+    if train_only_listed:
+        token_lr_raw = tokens_cfg.get("train_only_lr", None)
+        token_lr = float(token_lr_raw) if token_lr_raw is not None else None
+        token_wd = float(tokens_cfg.get("train_only_weight_decay", 0.0))
+        token_spec = GroupSpec(
+            name="tokens_only",
+            suffixes=["embed_tokens", "lm_head"],
+            layers=None,
+            lr=token_lr,
+            lr_scale=None,
+            weight_decay=token_wd,
+        )
+        group_specs.insert(0, token_spec)
 
     # Apply one-time weight rescale before PEFT wrapping so it affects base weights
     try:
