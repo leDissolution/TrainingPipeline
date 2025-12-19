@@ -59,7 +59,7 @@ peft:
     - lm_head
 
 layerwise_lr:
-  base_lr: 5.0e-5
+  base_lr: 1.0e-4
 
 training:
   seed: 42
@@ -67,7 +67,7 @@ training:
   output_dir: "${WORK_BASE}/g2b-embed"
   merge_output_dir: "${ARTIFACTORY_BASE}/g2b-embed"
   #merge_output_dir: null
-  effective_batch_size: 5
+  effective_batch_size: 20
   gradient_accumulation_steps: 1
   warmup_ratio: 0.1
   lr_scheduler_type: cosine

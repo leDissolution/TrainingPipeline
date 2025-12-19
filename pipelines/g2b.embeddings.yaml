@@ -23,10 +23,10 @@ stages:
       args:
         --base_path: "${DATASET}"
         --output_dir: "${DATASET}/Assembled_0"
-        --batch_size: 12
+        --batch_size: 20
         --seed: 42
-        --max_per_attr: 10
-        --epochs: 1
+        --max_per_attr: 20
+        --epochs: 2
 
   - name: assemble_tokens
     script:
@@ -41,10 +41,6 @@ stages:
       base_config: configs/granite2b/embeddings/base.yaml
       name: seeds
       param_ranges:
-        #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.effective_batch_size: [12]
-        training.num_train_epochs: [2]
-        layerwise_lr.base_lr: [5.0e-5, 1.0e-4]
         training.disable_shuffle: [true]
 
   - name: embeddings
