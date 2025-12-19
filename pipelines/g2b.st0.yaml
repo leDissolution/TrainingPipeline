@@ -2,6 +2,7 @@ environment: configs/environments/pod.yaml
 vars:
   MODEL_NAME: "g2b"
   DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
+  STAGE_EMBEDDINGS_BEST: "${ARTIFACTORY_BASE}/${MODEL_NAME}-embed"
 
 stages:
   - name: prepare_dataset
@@ -34,13 +35,12 @@ stages:
       name: seeds
       param_ranges:
         #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        peft.random_state: [42, 1234, 3407]
         training.disable_shuffle: [true]
 
   - name: stage0
     env_variables:
       - name: CUDA_VISIBLE_DEVICES
-        value: 0
+        value: 1
       - name: PER_EX_TRAIN_LOG_TOPK
         value: "5"
       - name: PER_EX_TRAIN_LOG_MIN_LOSS

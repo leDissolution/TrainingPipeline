@@ -45,6 +45,7 @@ stages:
         training.effective_batch_size: [12]
         training.num_train_epochs: [2]
         layerwise_lr.base_lr: [5.0e-5, 1.0e-4]
+        training.disable_shuffle: [true]
 
   - name: embeddings
     env_variables:

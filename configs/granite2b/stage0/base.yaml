@@ -7,22 +7,12 @@ dataset:
   - "${DATASET}/Assembled_0/eval.jsonl"
 
 model:
-  model_name: "ibm-granite/granite-3.1-2b-base"
-
-tokens:
-  pad_to_eos: true
-  add_and_init:
-    - { token: "!!no_change!!",    init: "sameSamecopyCopycloneCloneidentical" }
-  grad_boost:
-    factor: 5.0
-    target: all            # new | all
-    apply_to: ["input", "output"]
+  model_name: "${STAGE_EMBEDDINGS_BEST}"
 
 peft:
   r: 64
   lora_alpha: rank
   lora_dropout: 0.0
-  modules_to_save: ["embed_tokens", "lm_head"]
   modules:
     - mlp.down_proj
     - q_proj
@@ -65,11 +55,6 @@ layerwise_lr:
       layers: { start: 0, end: 40 }
       lr_scale: 0.33
       force_enable: false
-      force_require_grad: true
-    - name: embed
-      suffixes: ["embed_tokens", "lm_head"]
-      lr_scale: 0.35
-      weight_decay: 0.0001
       force_require_grad: true
 
 training:
