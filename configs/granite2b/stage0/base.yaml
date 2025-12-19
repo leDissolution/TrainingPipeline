@@ -13,15 +13,6 @@ tokens:
   pad_to_eos: true
   add_and_init:
     - { token: "!!no_change!!",    init: "sameSamecopyCopycloneCloneidentical" }
-    - { token: "message",          init: "messagenew" }
-    - { token: "previousMessage",  init: "messageold" }
-    - { token: "stats",            init: "stats" }
-    - { token: "unspecified",      init: "undefined" }
-    - { token: "nude",             init: "bare" }
-    - { token: "genitalia",        init: "sexgender" }
-    - { token: " genitalia",        init: " sex gender" }
-    - { token: " passages",         init: "doorwindowgate" }
-    - { token: " fixtures",         init: "fixturescouchtablebedfloor" }
   grad_boost:
     factor: 5.0
     target: all            # new | all

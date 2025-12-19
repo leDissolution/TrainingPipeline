@@ -23,7 +23,7 @@ stages:
       args:
         --base_path: "${DATASET}"
         --output_dir: "${DATASET}/Assembled_0"
-        --batch_size: 5
+        --batch_size: 12
         --seed: 42
         --max_per_attr: 10
         --epochs: 1
@@ -42,8 +42,8 @@ stages:
       name: seeds
       param_ranges:
         #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
-        training.effective_batch_size: [6, 12]
-        training.epochs: [3]
+        training.effective_batch_size: [12]
+        training.epochs: [2]
 
   - name: embeddings
     env_variables:

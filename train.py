@@ -488,6 +488,8 @@ def main() -> None:
 
     print("Full finetuning mode:", r_is_full)
 
+    print(f"[Model] Loading model {model_cfg.get('model_name')} with dtype={dtype}...")
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=str(model_cfg.get("model_name")),
         max_seq_length=int(model_cfg.get("max_seq_length", 2048)),
@@ -617,6 +619,45 @@ def main() -> None:
     all_token_ids: List[int] = []
     if token_inits:
         new_token_ids, all_token_ids = add_and_initialize_tokens(tokenizer, model, token_inits)
+
+    # --- Verification: log embedding state at START of training ---
+    try:
+        emb_start = model.get_input_embeddings().weight.detach()
+        emb_sum_start = emb_start.sum().item()
+        emb_norm_start = emb_start.norm().item()
+        sample_idx = min(100, emb_start.size(0) - 1)
+        sample_vec_start = emb_start[sample_idx, :8].tolist()
+        print(f"[Verify-START] Input embedding sum={emb_sum_start:.6f}, norm={emb_norm_start:.6f}")
+        print(f"[Verify-START] Input emb sample token {sample_idx} first 8 dims: {sample_vec_start}")
+        if all_token_ids:
+            for tid in all_token_ids[:3]:
+                if tid < emb_start.size(0):
+                    vec = emb_start[tid, :8].tolist()
+                    print(f"[Verify-START] Input emb custom token {tid} first 8 dims: {vec}")
+        
+        # Check lm_head (output embeddings) - crucial for predictions!
+        lm_head = getattr(model, "lm_head", None)
+        if lm_head is None:
+            try:
+                lm_head = model.get_output_embeddings()
+            except:
+                pass
+        if lm_head is not None and hasattr(lm_head, "weight"):
+            lm_w = lm_head.weight.detach()
+            lm_sum = lm_w.sum().item()
+            lm_norm = lm_w.norm().item()
+            # Check if tied to input embeddings
+            is_tied = lm_w.data_ptr() == emb_start.data_ptr()
+            print(f"[Verify-START] lm_head sum={lm_sum:.6f}, norm={lm_norm:.6f}, tied_to_input={is_tied}")
+            if all_token_ids:
+                for tid in all_token_ids[:3]:
+                    if tid < lm_w.size(0):
+                        vec = lm_w[tid, :8].tolist()
+                        print(f"[Verify-START] lm_head custom token {tid} first 8 dims: {vec}")
+        else:
+            print("[Verify-START] WARNING: Could not find lm_head weights!")
+    except Exception as e:
+        print(f"[Verify-START] Could not capture start embeddings: {e}")
 
     # Stash grad-boost config to apply AFTER PEFT wrapping
     gb = tokens_cfg.get("grad_boost") or {}
@@ -1186,9 +1227,87 @@ def main() -> None:
 
         if r_is_full:
             # Full FT: no merge needed; just save the full model
+            # Unsloth wraps the model, so we need to get the underlying HF model
             print("Finished training, saving full model without merge...")
-            model.save_pretrained(merge_dir, max_shard_size="3GB")
+            base_model = getattr(model, "model", model)
+            # If still wrapped (e.g., in a container), try common attribute names
+            if hasattr(base_model, "base_model"):
+                base_model = base_model.base_model
+            print(f"[Save] Wrapper model type: {type(model).__name__}, base model type: {type(base_model).__name__}")
+
+            # --- Verification: capture embedding state before save ---
+            try:
+                emb_before = model.get_input_embeddings().weight.detach().clone()
+                emb_sum_before = emb_before.sum().item()
+                emb_norm_before = emb_before.norm().item()
+                # Check a few specific token embeddings if we have new tokens
+                sample_idx = min(100, emb_before.size(0) - 1)
+                sample_vec_before = emb_before[sample_idx, :8].tolist()
+                print(f"[Verify] Pre-save embedding sum={emb_sum_before:.6f}, norm={emb_norm_before:.6f}")
+                print(f"[Verify] Pre-save sample token {sample_idx} first 8 dims: {sample_vec_before}")
+                if all_token_ids:
+                    for tid in all_token_ids[:3]:  # Check first 3 custom tokens
+                        vec = emb_before[tid, :8].tolist()
+                        print(f"[Verify] Pre-save custom token {tid} first 8 dims: {vec}")
+            except Exception as e:
+                print(f"[Verify] Could not capture pre-save embeddings: {e}")
+                emb_before = None
+
+            # Move to CPU and set dtype before saving to reduce VRAM and ensure correct dtype
+            try:
+                base_model = base_model.to("cpu", dtype=dtype)
+            except Exception:
+                try:
+                    base_model = base_model.to("cpu")
+                except Exception:
+                    pass
+            gc.collect()
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            base_model.save_pretrained(merge_dir, max_shard_size="3GB")
             tokenizer.save_pretrained(merge_dir)
+
+            # --- Verification: reload and compare ---
+            try:
+                from transformers import AutoModelForCausalLM
+                print(f"[Verify] Reloading saved model from {merge_dir} to verify...")
+                reloaded = AutoModelForCausalLM.from_pretrained(merge_dir, torch_dtype=dtype)
+                emb_after = reloaded.get_input_embeddings().weight.detach()
+                emb_sum_after = emb_after.sum().item()
+                emb_norm_after = emb_after.norm().item()
+                sample_vec_after = emb_after[sample_idx, :8].tolist()
+                print(f"[Verify] Post-reload embedding sum={emb_sum_after:.6f}, norm={emb_norm_after:.6f}")
+                print(f"[Verify] Post-reload sample token {sample_idx} first 8 dims: {sample_vec_after}")
+                if all_token_ids:
+                    for tid in all_token_ids[:3]:
+                        if tid < emb_after.size(0):
+                            vec = emb_after[tid, :8].tolist()
+                            print(f"[Verify] Post-reload custom token {tid} first 8 dims: {vec}")
+                        else:
+                            print(f"[Verify] WARNING: token {tid} out of range in reloaded model (vocab={emb_after.size(0)})")
+
+                # Compare
+                if emb_before is not None:
+                    if abs(emb_sum_before - emb_sum_after) < 1e-3:
+                        print("[Verify] ✓ Embeddings match after reload!")
+                    else:
+                        print(f"[Verify] ✗ MISMATCH! sum diff = {abs(emb_sum_before - emb_sum_after):.6f}")
+                        # Check if it matches original model instead
+                        orig_path = str(model_cfg.get("model_name"))
+                        print(f"[Verify] Loading original model from {orig_path} to compare...")
+                        orig_model = AutoModelForCausalLM.from_pretrained(orig_path, torch_dtype=dtype)
+                        orig_emb = orig_model.get_input_embeddings().weight.detach()
+                        orig_sum = orig_emb.sum().item()
+                        print(f"[Verify] Original model embedding sum={orig_sum:.6f}")
+                        if abs(emb_sum_after - orig_sum) < 1e-3:
+                            print("[Verify] ✗ SAVED MODEL MATCHES ORIGINAL - training was NOT saved!")
+                        del orig_model
+                del reloaded
+                gc.collect()
+            except Exception as e:
+                print(f"[Verify] Could not verify saved model: {e}")
         else:
             print("Finished training, merging model...")
             # Merge once, then move to CPU and set dtype

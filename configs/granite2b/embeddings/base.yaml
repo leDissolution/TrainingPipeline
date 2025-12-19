@@ -2,7 +2,7 @@ extends: ../base.yaml
 
 dataset:
   train_files:
-  - "${DATASET}/embeddings.train.jsonl"
+  - "${DATASET}/Assembled_0/train.jsonl"
   eval_files:
   - "${DATASET}/Assembled_0/eval.jsonl"
 
@@ -85,9 +85,3 @@ training:
 
 gradient_logging:
   enabled: false
-
-collator:
-  mode: prompt_span_masking
-  start_mask: '**/'
-  end_mask: '/**'
-  drop_mask_tokens: true
