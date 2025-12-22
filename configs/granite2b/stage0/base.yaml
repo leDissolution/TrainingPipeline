@@ -65,7 +65,7 @@ training:
   merge_output_dir: null
   effective_batch_size: 10
   gradient_accumulation_steps: 1
-  warmup_ratio: 0.05
+  warmup_ratio: 0.10
   lr_scheduler_type: cosine_with_min_lr
   lr_scheduler_kwargs:
     min_lr_rate: 0.66
@@ -78,7 +78,7 @@ training:
   save_strategy: epoch
   save_only_model: true
   eval_strategy: steps
-  eval_steps: 50
+  eval_steps: 100
   eval_on_start: true
 
 gradient_logging:

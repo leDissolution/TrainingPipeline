@@ -100,10 +100,22 @@ class MetricCalculator:
                 token_nll = token_nll.masked_fill(~valid_mask, 0.0)
                 token_counts = valid_mask.sum(dim=-1).clamp(min=1)
                 per_example_loss = token_nll.sum(dim=-1) / token_counts  # (B,)
+
+                token_probs = gathered.exp().masked_fill(~valid_mask, 0.0)
+                per_example_correct_prob = token_probs.sum(dim=-1) / token_counts
+
+                # Avg per-example gap between chosen token prob and correct-token prob (0 if correct)
+                shifted_pred_ids = pred_ids[:, :-1]
+                pred_log_probs = torch.gather(log_probs, dim=-1, index=shifted_pred_ids.unsqueeze(-1)).squeeze(-1)
+                prob_gap = (pred_log_probs.exp() - gathered.exp()).clamp_min(0.0)
+                prob_gap = prob_gap.masked_fill(~valid_mask, 0.0)
+                per_example_prob_gap = prob_gap.sum(dim=-1) / token_counts
             else:
                 per_example_loss = torch.zeros(pred_ids.size(0), dtype=torch.float32, device=pred_ids.device)
+                per_example_correct_prob = torch.zeros_like(per_example_loss)
+                per_example_prob_gap = torch.zeros_like(per_example_loss)
 
-        return (pred_ids, per_example_loss)
+        return (pred_ids, per_example_loss, per_example_correct_prob, per_example_prob_gap)
 
     # ------------------------------------------------------------------ #
     # 1)  Decode only the completion part of every sequence - vectorised #
@@ -154,13 +166,23 @@ class MetricCalculator:
         # - raw logits (B, S, V) [fallback]
         # - argmax token ids (B, S)
         per_example_loss = None
+        per_example_correct_prob = None
+        per_example_prob_gap = None
         logits = None
-        if isinstance(preds_obj, (tuple, list)) and len(preds_obj) == 2:
+        if isinstance(preds_obj, (tuple, list)):
             pred_ids = torch.as_tensor(preds_obj[0])
             try:
-                per_example_loss = torch.as_tensor(preds_obj[1]).to(torch.float32)
+                per_example_loss = torch.as_tensor(preds_obj[1]).to(torch.float32) if len(preds_obj) >= 2 else None
             except Exception:
                 per_example_loss = None
+            try:
+                per_example_correct_prob = torch.as_tensor(preds_obj[2]).to(torch.float32) if len(preds_obj) >= 3 else None
+            except Exception:
+                per_example_correct_prob = None
+            try:
+                per_example_prob_gap = torch.as_tensor(preds_obj[3]).to(torch.float32) if len(preds_obj) >= 4 else None
+            except Exception:
+                per_example_prob_gap = None
         else:
             pred_ids = torch.as_tensor(preds_obj)
             if pred_ids.dim() == 3:
@@ -171,8 +193,7 @@ class MetricCalculator:
         # 1) shift (the trainer already shifted labels for
         #    causal-LMs, so usually this is no longer necessary)
         # If predictions are logits (B, S, V), convert to token ids first
-        logits = None
-        if pred_ids.dim() == 3:
+        if logits is None and pred_ids.dim() == 3:
             logits = pred_ids
             pred_ids = torch.argmax(pred_ids, dim=-1)
         pred_ids = pred_ids[:, :-1]
@@ -207,16 +228,29 @@ class MetricCalculator:
 
         # 2) extract completion token id sequences for per-example checks
         mask = label_ids.ne(self.ignore_index) if label_ids is not None else torch.zeros_like(pred_ids, dtype=torch.bool)  # (B, S) bool
-        # If per_example_loss wasn't provided (older path), compute cheaply from logits if available
-        if per_example_loss is None and logits is not None and label_ids is not None:
+        # If per-example stats weren't provided (older path), compute cheaply from logits if available
+        if logits is not None and label_ids is not None:
             with torch.no_grad():
                 safe_labels = label_ids.masked_fill(~mask, 0)
                 log_probs = F.log_softmax(logits.to(dtype=torch.float32), dim=-1)
                 gathered = torch.gather(log_probs, dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
-                token_nll = -gathered
-                token_nll = token_nll.masked_fill(~mask, 0.0)
                 token_counts = mask.sum(dim=-1).clamp(min=1)
-                per_example_loss = token_nll.sum(dim=-1) / token_counts
+
+                if per_example_loss is None:
+                    token_nll = -gathered
+                    token_nll = token_nll.masked_fill(~mask, 0.0)
+                    per_example_loss = token_nll.sum(dim=-1) / token_counts
+
+                if per_example_correct_prob is None:
+                    token_probs = gathered.exp().masked_fill(~mask, 0.0)
+                    per_example_correct_prob = token_probs.sum(dim=-1) / token_counts
+
+                if per_example_prob_gap is None:
+                    # Use shifted pred_ids (already shifted above)
+                    pred_log_probs = torch.gather(log_probs, dim=-1, index=pred_ids.unsqueeze(-1)).squeeze(-1)
+                    prob_gap = (pred_log_probs.exp() - gathered.exp()).clamp_min(0.0)
+                    prob_gap = prob_gap.masked_fill(~mask, 0.0)
+                    per_example_prob_gap = prob_gap.sum(dim=-1) / token_counts
 
         pred_seqs_ids  = [p[m].tolist() for p, m in zip(pred_ids, mask)]
         if label_ids is not None:
@@ -331,6 +365,32 @@ class MetricCalculator:
             metrics["loss_p50"] = 0.0
             metrics["loss_p80"] = 0.0
             metrics["loss_p95"] = 0.0
+
+        # Correct-token probability summaries across examples
+        if per_example_correct_prob is not None and per_example_correct_prob.numel() > 0:
+            probs_np = per_example_correct_prob.detach().cpu().numpy()
+            metrics["correct_prob_avg"] = float(np.mean(probs_np))
+            metrics["correct_prob_p50"] = float(np.quantile(probs_np, 0.5))
+            metrics["correct_prob_p20"] = float(np.quantile(probs_np, 0.2))
+            metrics["correct_prob_p05"] = float(np.quantile(probs_np, 0.05))
+        else:
+            metrics["correct_prob_avg"] = 0.0
+            metrics["correct_prob_p50"] = 0.0
+            metrics["correct_prob_p20"] = 0.0
+            metrics["correct_prob_p05"] = 0.0
+
+        # Probability gap (chosen minus correct) summaries
+        if per_example_prob_gap is not None and per_example_prob_gap.numel() > 0:
+            gaps_np = per_example_prob_gap.detach().cpu().numpy()
+            metrics["prob_gap_avg"] = float(np.mean(gaps_np))
+            metrics["prob_gap_p50"] = float(np.quantile(gaps_np, 0.5))
+            metrics["prob_gap_p80"] = float(np.quantile(gaps_np, 0.8))
+            metrics["prob_gap_p95"] = float(np.quantile(gaps_np, 0.95))
+        else:
+            metrics["prob_gap_avg"] = 0.0
+            metrics["prob_gap_p50"] = 0.0
+            metrics["prob_gap_p80"] = 0.0
+            metrics["prob_gap_p95"] = 0.0
 
         # Stash per-example success for external callbacks to persist
         try:
