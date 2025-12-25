@@ -1,0 +1,78 @@
+environment: configs/environments/pod.yaml
+vars:
+  MODEL_NAME: "qwen0.6b"
+  DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
+
+stages:
+  - name: prepare_dataset
+    script:
+      name: ../DatasetProcessor/prepare_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --out_path: "${DATASET}"
+        --with_loss: false
+        --with_chats: false
+        --with_synthetic: true
+        --clean: true
+
+  - name: assemble_dataset
+    script:
+      name: ../DatasetProcessor/assemble_stage0.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET}"
+        --output_dir: "${DATASET}/Assembled_0"
+        --batch_size: 20
+        --seed: 42
+        --max_per_attr: 20
+        --epochs: 2
+
+  - name: assemble_tokens
+    script:
+      name: ../DatasetProcessor/assemble_embeddings.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --output_dir: "${DATASET}"
+
+  - name: embeddings_make_sweeps
+    make_sweeps:
+      base_config: configs/qwen0.6b/embeddings/base.yaml
+      name: seeds
+      param_ranges:
+        training.disable_shuffle: [true]
+
+  - name: embeddings
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 0
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
+    script:
+      name: train.py
+      args:
+        --config: #configs/qwen0.6b/embeddings/base.yaml
+          sweep: configs/qwen0.6b/embeddings/seeds
+
+  # - name: pick_best_embeddings
+  #   select_best:
+  #     from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-embed
+  #     metric: exact_match
+  #     prefer: max
+  #     file: last_eval_metrics.json
+  #     var_name: EMBEDDINGS_BEST
+  #     fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-embed
+
+  # - name: publish_embeddings_to_hf
+  #   publish_to_hf:
+  #     model_id: LeDissolution/statsuite_qwen0.6b_embed
+  #     from_dir: ${EMBEDDINGS_BEST}
+
+  # - name: shutdown
+  #   script:
+  #     name: shutdown.py

@@ -7,7 +7,7 @@ dataset:
   - "${DATASET}/Assembled_0/eval.jsonl"
 
 model:
-  model_name: "ibm-granite/granite-3.1-2b-base"
+  model_name: "Qwen/Qwen3-0.6B-Base"
 
 tokens:
   pad_to_eos: true
@@ -68,8 +68,8 @@ layerwise_lr:
 training:
   seed: 42
   dataset_seed: 1234
-  output_dir: "${WORK_BASE}/g2b-embed"
-  merge_output_dir: "${ARTIFACTORY_BASE}/g2b-embed"
+  output_dir: "${WORK_BASE}/qwen0.6b-embed"
+  merge_output_dir: "${ARTIFACTORY_BASE}/qwen0.6b-embed"
   #merge_output_dir: null
   effective_batch_size: 20
   gradient_accumulation_steps: 1

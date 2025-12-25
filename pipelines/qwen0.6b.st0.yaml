@@ -1,0 +1,72 @@
+environment: configs/environments/pod.yaml
+vars:
+  MODEL_NAME: "qwen0.6b"
+  DATASET: "${DATASET_BASE}_prepared/${MODEL_NAME}"
+  STAGE_EMBEDDINGS_BEST: "${ARTIFACTORY_BASE}/${MODEL_NAME}-embed"
+
+stages:
+  - name: prepare_dataset
+    script:
+      name: ../DatasetProcessor/prepare_dataset.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET_BASE}"
+        --out_path: "${DATASET}"
+        --with_loss: false
+        --with_chats: false
+        --with_synthetic: true
+        --clean: true
+
+  - name: assemble_dataset
+    script:
+      name: ../DatasetProcessor/assemble_stage0.py
+      venv: ../DatasetProcessor/.venv
+      args:
+        --base_path: "${DATASET}"
+        --output_dir: "${DATASET}/Assembled_0"
+        --batch_size: 10
+        --seed: 42
+        --max_per_attr: 10
+        --epochs: 3
+
+  - name: stage0_make_sweeps
+    make_sweeps:
+      base_config: configs/qwen0.6b/stage0/base.yaml
+      name: seeds
+      param_ranges:
+        #training.dataset_seed: [42, 1234, 3407, 5678, 9999, 10000, 12321, 20242]
+        training.disable_shuffle: [true]
+
+  - name: stage0
+    env_variables:
+      - name: CUDA_VISIBLE_DEVICES
+        value: 1
+      - name: PER_EX_TRAIN_LOG_TOPK
+        value: "5"
+      - name: PER_EX_TRAIN_LOG_MIN_LOSS
+        value: "0.5"
+      - name: PER_EX_TRAIN_LOG_TEXT
+        value: "1"
+    script:
+      name: train.py
+      args:
+        --config: #configs/qwen0.6b/stage0/base.yaml
+          sweep: configs/qwen0.6b/stage0/seeds
+
+  - name: pick_best_stage0
+    select_best:
+      from_dir: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+      metric: exact_match
+      prefer: max
+      file: last_eval_metrics.json
+      var_name: STAGE0_BEST
+      fallback: ${ARTIFACTORY_BASE}/${MODEL_NAME}-stage0
+
+  - name: publish_stage0_to_hf
+    publish_to_hf:
+      model_id: LeDissolution/statsuite_qwen0.6b_stage0
+      from_dir: ${STAGE0_BEST}
+
+  - name: shutdown
+    script:
+      name: shutdown.py

@@ -1,0 +1,95 @@
+extends: ../base.yaml
+
+dataset:
+  train_files:
+  - "${DATASET}/Assembled_0/train.jsonl"
+  eval_files:
+  - "${DATASET}/Assembled_0/eval.jsonl"
+
+model:
+  model_name: "${STAGE_EMBEDDINGS_BEST}"
+
+peft:
+  r: 64
+  lora_alpha: rank
+  lora_dropout: 0.0
+  modules:
+    - mlp.down_proj
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+  layered_modules:
+    mlp.up_proj:
+      layers: auto
+    mlp.gate_proj:
+      layers: auto
+
+layerwise_lr:
+  base_lr: 3.0e-5
+  groups:
+    - name: up_gate_special
+      suffixes: ["mlp.gate_proj", "mlp.up_proj", "mlp.down_proj"]
+      layers: [0]
+      lr_scale: 1
+      weight_rescale: 0.5
+      force_enable: true
+    - name: layernorms_special
+      suffixes: ["input_layernorm"]
+      layers: [0]
+      lr_scale: 0.66
+      force_enable: false
+      force_require_grad: true
+    - name: up
+      suffixes: ["mlp.up_proj"]
+      layers: { start: 0, end: 28 }
+      lr_scale: 0.66
+      force_enable: true
+    - name: gate_down
+      suffixes: ["mlp.gate_proj", "mlp.down_proj"]
+      layers: { start: 0, end: 28 }
+      lr_scale: 1.0
+      force_enable: true
+    - name: layernorms
+      suffixes: ["input_layernorm"]
+      layers: { start: 0, end: 28 }
+      lr_scale: 0.33
+      force_enable: false
+      force_require_grad: true
+
+training:
+  seed: 42
+  dataset_seed: 1234
+  output_dir: "${WORK_BASE}/qwen0.6b-stage0"
+  #merge_output_dir: "${ARTIFACTORY_BASE}/qwen0.6b-stage0"
+  merge_output_dir: null
+  effective_batch_size: 10
+  gradient_accumulation_steps: 1
+  warmup_ratio: 0.10
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.66
+  weight_decay: 0.001
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  num_train_epochs: 1
+  max_grad_norm: 1.0
+  logging_steps: 1
+  save_strategy: epoch
+  save_only_model: true
+  eval_strategy: steps
+  eval_steps: 100
+  eval_on_start: true
+
+gradient_logging:
+  enabled: false
+
+loss:
+  use_fork_weighed: false
+  fork_mask_key: fork_mask
+  fork_alpha: 1.0
+  mask_generator:
+    type: after_special_token
+    args:
+      tokens: ["=\"", ",", " (", ";"]
+      include_special_tokens: true
